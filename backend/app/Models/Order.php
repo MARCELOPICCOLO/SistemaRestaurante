@@ -8,8 +8,9 @@ class Order extends Model
 {
     protected $fillable = [
         'restaurant_id',
-        'table_name',
+        'table_id',
         'status',
+        'total'
     ];
 
     public function items()
