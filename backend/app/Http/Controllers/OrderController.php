@@ -1,11 +1,10 @@
 <?php
+// app/Http/Controllers/OrderController.php
 
 namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Table;
-use App\Models\Product;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
@@ -13,174 +12,260 @@ class OrderController extends Controller
     // 📋 LISTAR COMANDAS
     public function index(Request $request)
     {
-        $restaurantId = $request->query('restaurant_id');
+        try {
+            $query = Order::with('items.product');
 
-        $orders = Order::with('items.product')
-            ->when($restaurantId, function ($query) use ($restaurantId) {
-                $query->where('restaurant_id', $restaurantId);
-            })
-            ->get();
+            if ($request->has('restaurant_id')) {
+                $query->where('restaurant_id', $request->restaurant_id);
+            }
 
-        return response()->json($orders);
+            $orders = $query->get();
+
+            return response()->json($orders);
+        } catch (\Exception $e) {
+            \Log::error('Erro ao buscar orders: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Erro ao buscar comandas',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // 🔍 MOSTRAR UMA COMANDA
     public function show($id)
     {
-        $order = Order::with('items.product')->findOrFail($id);
-        return response()->json($order);
+        try {
+            $order = Order::with('items.product')->findOrFail($id);
+            return response()->json($order);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Comanda não encontrada'
+            ], 404);
+        }
     }
 
     // ➕ CRIAR COMANDA
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'restaurant_id' => 'required|exists:restaurants,id',
-            'table_id'      => 'required|exists:tables,id',
-        ]);
+        try {
+            $data = $request->validate([
+                'restaurant_id' => 'required|exists:restaurants,id',
+                'table_id'      => 'required|exists:tables,id',
+                'customer_name' => 'nullable|string|max:100'
+            ]);
 
-        // 🔒 Valida mesa
-        $table = Table::where('id', $data['table_id'])
-            ->where('restaurant_id', $data['restaurant_id'])
-            ->first();
+            $table = \App\Models\Table::where('id', $data['table_id'])
+                ->where('restaurant_id', $data['restaurant_id'])
+                ->first();
 
-        if (!$table) {
+            if (!$table) {
+                return response()->json(['message' => 'Mesa não pertence ao restaurante'], 400);
+            }
+
+            $customerName = $data['customer_name'] ?? 'Cliente ' . (Order::where('table_id', $data['table_id'])->where('status', 'aberto')->count() + 1);
+
+            $order = Order::create([
+                'restaurant_id' => $data['restaurant_id'],
+                'table_id'      => $data['table_id'],
+                'customer_name' => $customerName,
+                'status'        => 'aberto',
+                'total'         => 0
+            ]);
+
             return response()->json([
-                'message' => 'Mesa não pertence ao restaurante'
-            ], 400);
-        }
-
-        // 🚫 Verifica comanda aberta
-        $orderOpen = Order::where('table_id', $data['table_id'])
-            ->where('status', 'aberto')
-            ->first();
-
-        if ($orderOpen) {
+                'message' => 'Comanda criada com sucesso',
+                'order' => $order
+            ], 201);
+        } catch (\Exception $e) {
+            \Log::error('Erro ao criar comanda: ' . $e->getMessage());
             return response()->json([
-                'message' => 'Já existe uma comanda aberta',
-                'order' => $orderOpen
-            ], 200);
+                'message' => 'Erro ao criar comanda',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $order = Order::create([
-            'restaurant_id' => $data['restaurant_id'],
-            'table_id'      => $data['table_id'],
-            'status'        => 'aberto',
-            'total'         => 0
-        ]);
-
-        return response()->json($order, 201);
     }
 
     // 🍟 ADICIONAR ITEM
     public function addItem(Request $request, $orderId)
     {
-        $data = $request->validate([
-            'product_id' => 'required|exists:products,id',
-        ]);
-
-        $order = Order::findOrFail($orderId);
-
-        if ($order->status !== 'aberto') {
-            return response()->json(['message' => 'Comanda não está aberta'], 400);
-        }
-
-        $product = Product::findOrFail($data['product_id']);
-
-        // 🔒 garante que produto pertence ao restaurante
-        if ($product->restaurant_id !== $order->restaurant_id) {
-            return response()->json([
-                'message' => 'Produto não pertence ao restaurante'
-            ], 400);
-        }
-
-        $item = $order->items()
-            ->where('product_id', $product->id)
-            ->first();
-
-        if ($item) {
-            $item->increment('quantity');
-        } else {
-            $order->items()->create([
-                'product_id' => $product->id,
-                'quantity'   => 1,
-                'price'      => $product->price,
+        try {
+            $data = $request->validate([
+                'product_id' => 'required|exists:products,id',
             ]);
+
+            $order = Order::findOrFail($orderId);
+
+            if ($order->status !== 'aberto') {
+                return response()->json(['message' => 'Comanda não está aberta'], 400);
+            }
+
+            $product = \App\Models\Product::findOrFail($data['product_id']);
+
+            if ($product->restaurant_id !== $order->restaurant_id) {
+                return response()->json(['message' => 'Produto não pertence ao restaurante'], 400);
+            }
+
+            $item = $order->items()->where('product_id', $product->id)->first();
+
+            if ($item) {
+                $item->increment('quantity');
+                $orderItem = $item;
+            } else {
+                $orderItem = $order->items()->create([
+                    'product_id' => $product->id,
+                    'quantity'   => 1,
+                    'price'      => $product->price,
+                ]);
+            }
+
+            $this->updateTotal($order);
+
+            // Retorna o item criado/atualizado com seu ID
+            return response()->json([
+                'message' => 'Item adicionado',
+                'item' => $orderItem
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao adicionar item',
+                'error' => $e->getMessage()
+            ], 500);
         }
+    }
 
-        // 🔥 ATUALIZA TOTAL
-        $this->updateTotal($order);
+    // 📋 LISTAR ITENS DA COMANDA
+    public function getItems($orderId)
+    {
+        try {
+            $items = OrderItem::where('order_id', $orderId)
+                ->with('product')
+                ->get();
 
-        return response()->json(['message' => 'Item adicionado']);
+            return response()->json($items);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao buscar itens',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // ✏️ ATUALIZAR QUANTIDADE
     public function updateItem(Request $request, $itemId)
     {
-        $data = $request->validate([
-            'quantity' => 'required|integer|min:1',
-        ]);
+        try {
+            $data = $request->validate([
+                'quantity' => 'required|integer|min:1',
+            ]);
 
-        $item = OrderItem::findOrFail($itemId);
+            $item = OrderItem::findOrFail($itemId);
+            $item->update(['quantity' => $data['quantity']]);
 
-        $item->update([
-            'quantity' => $data['quantity'],
-        ]);
+            $this->updateTotal($item->order);
 
-        $this->updateTotal($item->order);
-
-        return response()->json($item);
+            return response()->json([
+                'message' => 'Item atualizado',
+                'item' => $item
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao atualizar item',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // ❌ REMOVER ITEM
     public function removeItem($itemId)
     {
-        $item = OrderItem::findOrFail($itemId);
-        $order = $item->order;
+        try {
+            $item = OrderItem::findOrFail($itemId);
+            $order = $item->order;
+            $item->delete();
+            $this->updateTotal($order);
 
-        $item->delete();
-
-        $this->updateTotal($order);
-
-        return response()->json([
-            'message' => 'Item removido'
-        ]);
+            return response()->json([
+                'message' => 'Item removido com sucesso'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao remover item',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // 💰 FECHAR COMANDA
     public function close($id)
     {
-        $order = Order::findOrFail($id);
+        try {
+            $order = Order::findOrFail($id);
 
-        $order->update([
-            'status' => 'finalizado'
-        ]);
+            if ($order->status === 'fechado') {
+                return response()->json(['message' => 'Comanda já está finalizada'], 400);
+            }
 
-        return response()->json([
-            'message' => 'Comanda finalizada'
-        ]);
+            $order->update([
+                'status' => 'fechado',
+                'closed_at' => now()
+            ]);
+
+            return response()->json([
+                'message' => 'Comanda finalizada com sucesso',
+                'order' => $order
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao finalizar comanda',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
-    // ❌ DELETAR COMANDA
+    // ❌ CANCELAR COMANDA
     public function destroy($id)
     {
-        $order = Order::findOrFail($id);
-        $order->delete();
+        try {
+            $order = Order::findOrFail($id);
+            $order->update(['status' => 'cancelado']);
 
-        return response()->json([
-            'message' => 'Comanda deletada'
-        ]);
+            return response()->json([
+                'message' => 'Comanda cancelada com sucesso'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao cancelar comanda',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
-    // 🔥 MÉTODO AUXILIAR
+    // 📊 COMANDAS POR MESA
+    public function getByTable($tableId)
+    {
+        try {
+            $orders = Order::where('table_id', $tableId)
+                ->where('status', 'aberto')
+                ->with('items.product')
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            return response()->json($orders);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao buscar comandas da mesa',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // 🔥 MÉTODO AUXILIAR - ATUALIZAR TOTAL
     private function updateTotal($order)
     {
         $total = $order->items()
             ->selectRaw('SUM(price * quantity) as total')
             ->value('total') ?? 0;
 
-        $order->update([
-            'total' => $total
-        ]);
+        $order->update(['total' => $total]);
     }
 }

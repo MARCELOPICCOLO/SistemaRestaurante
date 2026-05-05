@@ -1,4 +1,5 @@
 <?php
+// app/Models/Order.php
 
 namespace App\Models;
 
@@ -9,12 +10,44 @@ class Order extends Model
     protected $fillable = [
         'restaurant_id',
         'table_id',
+        'customer_name',
         'status',
-        'total'
+        'total',
+        'closed_at'
     ];
 
+    protected $casts = [
+        'total' => 'decimal:2',
+        'closed_at' => 'datetime'
+    ];
+
+    // Relacionamento com a mesa
+    public function table()
+    {
+        return $this->belongsTo(Table::class);
+    }
+
+    // ✅ RELACIONAMENTO COM OS ITENS (CORRIGIDO)
     public function items()
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    // Relacionamento com o restaurante
+    public function restaurant()
+    {
+        return $this->belongsTo(Restaurant::class);
+    }
+
+    // Escopo para comandas abertas
+    public function scopeOpen($query)
+    {
+        return $query->where('status', 'aberto');
+    }
+
+    // Escopo para comandas fechadas
+    public function scopeClosed($query)
+    {
+        return $query->where('status', 'fechado');
     }
 }
