@@ -13,12 +13,19 @@ export default function PDV() {
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [filtroProduto, setFiltroProduto] = useState("");
 
+  // Estados para múltiplas comandas
+  const [comandaSelecionada, setComandaSelecionada] = useState(null);
+  const [modalAbrirComanda, setModalAbrirComanda] = useState(null);
+  const [nomeComanda, setNomeComanda] = useState("");
+  const [showSelectComanda, setShowSelectComanda] = useState(false);
+  const [produtoPendente, setProdutoPendente] = useState(null);
+
   // Estado para modal de finalizar
   const [modalFinalizar, setModalFinalizar] = useState(false);
 
   // Estado para responsividade
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [activePanel, setActivePanel] = useState("mesas"); // "mesas", "cardapio", "comanda"
+  const [activePanel, setActivePanel] = useState("mesas");
 
   useEffect(() => {
     const handleResize = () => {
@@ -31,33 +38,84 @@ export default function PDV() {
   useEffect(() => {
     async function loadData() {
       try {
-        const [resProducts, resCategories, resTables, resOrders] =
-          await Promise.all([
-            fetch("http://localhost:8000/api/products?restaurant_id=1"),
-            fetch("http://localhost:8000/api/categories?restaurant_id=1"),
-            fetch("http://localhost:8000/api/tables?restaurant_id=1"),
-            fetch("http://localhost:8000/api/orders?restaurant_id=1"),
-          ]);
+        // Carregar produtos, categorias e mesas
+        const [resProducts, resCategories, resTables] = await Promise.all([
+          fetch("http://localhost:8000/api/products?restaurant_id=1"),
+          fetch("http://localhost:8000/api/categories?restaurant_id=1"),
+          fetch("http://localhost:8000/api/tables?restaurant_id=1"),
+        ]);
 
         const productsData = await resProducts.json();
         const categoriesData = await resCategories.json();
         const tablesData = await resTables.json();
-        const ordersData = await resOrders.json();
 
         setProdutos(productsData);
         setCategorias(categoriesData);
         setMesas(tablesData);
+
+        // Carregar comandas abertas do backend
+        const resOrders = await fetch(
+          "http://localhost:8000/api/orders?restaurant_id=1",
+        );
+        const ordersData = await resOrders.json();
+
+        console.log("Comandas carregadas do backend:", ordersData);
         setOrders(ordersData);
 
-        const comandasIniciais = {};
+        // Estruturar as comandas por mesa
+        const comandasEstruturadas = {};
+
+        // Inicializar array vazio para cada mesa
         tablesData.forEach((t) => {
-          comandasIniciais[`mesa-${t.number}`] = [];
+          comandasEstruturadas[`mesa-${t.number}`] = [];
         });
 
-        setComandas(comandasIniciais);
+        // Para cada comanda aberta, adicionar à sua mesa correspondente
+        ordersData.forEach((order) => {
+          if (order.status === "aberto") {
+            // Encontrar a mesa pelo table_id
+            const mesa = tablesData.find((t) => t.id === order.table_id);
+            if (mesa) {
+              const mesaNome = `mesa-${mesa.number}`;
 
+              // Buscar os itens da comanda com orderItemId
+              let items = [];
+              if (order.items && order.items.length > 0) {
+                items = order.items.map((item) => ({
+                  id: item.product_id,
+                  orderItemId: item.id, // GUARDA O order_item_id
+                  name:
+                    item.product?.name ||
+                    item.name ||
+                    `Produto ${item.product_id}`,
+                  product_code: item.product?.product_code,
+                  price: parseFloat(item.price),
+                  qtd: item.quantity,
+                }));
+              }
+
+              comandasEstruturadas[mesaNome].push({
+                orderId: order.id,
+                customerName: order.customer_name || `Comanda ${order.id}`,
+                items: items,
+              });
+            }
+          }
+        });
+
+        setComandas(comandasEstruturadas);
+
+        // Selecionar primeira mesa se houver
         if (tablesData.length > 0) {
-          setMesaAtual(`mesa-${tablesData[0].number}`);
+          const mesaInicial = `mesa-${tablesData[0].number}`;
+          setMesaAtual(mesaInicial);
+
+          // Selecionar primeira comanda da mesa se existir
+          if (comandasEstruturadas[mesaInicial].length > 0) {
+            setComandaSelecionada(comandasEstruturadas[mesaInicial][0].orderId);
+          } else {
+            setComandaSelecionada(null);
+          }
         }
       } catch (error) {
         console.error("Erro ao carregar dados:", error);
@@ -100,6 +158,7 @@ export default function PDV() {
       setComandas((prev) => ({ ...prev, [nomeMesa]: [] }));
       setMesaAtual(nomeMesa);
       setNovaMesa("");
+      setComandaSelecionada(null);
     } catch (error) {
       console.error(error);
     }
@@ -113,6 +172,18 @@ export default function PDV() {
       window.confirm(`Tem certeza que deseja excluir a mesa ${mesa.number}?`)
     ) {
       try {
+        // Primeiro, fechar todas as comandas abertas da mesa
+        const comandasDaMesa = comandas[mesaNome] || [];
+        for (const comanda of comandasDaMesa) {
+          await fetch(
+            `http://localhost:8000/api/orders/${comanda.orderId}/close`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
         const response = await fetch(
           `http://localhost:8000/api/tables/${mesa.id}`,
           {
@@ -136,9 +207,15 @@ export default function PDV() {
           return newComandas;
         });
 
+        // Atualizar orders removendo as comandas
+        setOrders((prev) =>
+          prev.filter((o) => !comandasDaMesa.some((c) => c.orderId === o.id)),
+        );
+
         if (mesaAtual === mesaNome) {
           const firstMesa = Object.keys(comandas).find((m) => m !== mesaNome);
           setMesaAtual(firstMesa || "");
+          setComandaSelecionada(null);
         }
       } catch (error) {
         console.error(error);
@@ -146,20 +223,20 @@ export default function PDV() {
     }
   };
 
-  const getOrderByMesa = (mesaNome) => {
-    const mesa = mesas.find((m) => `mesa-${m.number}` === mesaNome);
-    if (!mesa) return null;
-
-    return orders.find((o) => o.table_id === mesa.id && o.status === "aberto");
+  const getOrderById = (orderId) => {
+    return orders.find((o) => o.id === orderId);
   };
 
-  const abrirComanda = async (mesaNome) => {
+  const getComandasDaMesa = (mesaNome) => {
+    return comandas[mesaNome] || [];
+  };
+
+  const abrirComanda = async (mesaNome, nomeCliente) => {
     const mesa = mesas.find((m) => `mesa-${m.number}` === mesaNome);
     if (!mesa) return;
 
-    const comandaExistente = getOrderByMesa(mesaNome);
-    if (comandaExistente) {
-      alert("Esta mesa já possui uma comanda aberta!");
+    if (!nomeCliente || nomeCliente.trim() === "") {
+      alert("Digite um nome para identificar a comanda");
       return;
     }
 
@@ -173,6 +250,7 @@ export default function PDV() {
         body: JSON.stringify({
           restaurant_id: 1,
           table_id: mesa.id,
+          customer_name: nomeCliente,
         }),
       });
 
@@ -185,10 +263,20 @@ export default function PDV() {
 
       const novaOrder = data.order || data;
       setOrders((prev) => [...prev, novaOrder]);
-      setComandas((prev) => ({ ...prev, [mesaNome]: [] }));
 
-      alert(`Comanda aberta para a mesa ${mesa.number}!`);
+      setComandas((prev) => ({
+        ...prev,
+        [mesaNome]: [
+          ...(prev[mesaNome] || []),
+          { orderId: novaOrder.id, items: [], customerName: nomeCliente },
+        ],
+      }));
+
+      alert(`Comanda de ${nomeCliente} aberta para a mesa ${mesa.number}!`);
+      setModalAbrirComanda(null);
+      setNomeComanda("");
       setMenuMesa(null);
+
       if (isMobile) {
         setActivePanel("cardapio");
       }
@@ -198,31 +286,199 @@ export default function PDV() {
     }
   };
 
-  const finalizarComanda = async () => {
-    if (comanda.length === 0) {
-      alert("Adicione itens à comanda");
-      return;
-    }
+  const getComandaItems = (mesaNome, orderId) => {
+    const comandaMesa = comandas[mesaNome] || [];
+    const comanda = comandaMesa.find((c) => c.orderId === orderId);
+    return comanda ? comanda.items : [];
+  };
 
-    const order = getOrderByMesa(mesaAtual);
-    if (!order) {
-      alert("Nenhuma comanda aberta para esta mesa");
+  const addItem = async (produto, orderId) => {
+    if (!mesaAtual) {
+      alert("Selecione uma mesa primeiro");
       return;
     }
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/orders/${order.id}`,
+        `http://localhost:8000/api/orders/${orderId}/items`,
         {
-          method: "PUT",
+          method: "POST",
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
           },
           body: JSON.stringify({
-            status: "fechado",
-            total: total,
+            product_id: produto.id,
           }),
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.message || "Erro ao adicionar item");
+        return;
+      }
+
+      const data = await response.json();
+      const novoOrderItem = data.item; // Pega o order_item_id do backend
+
+      const comandaMesa = comandas[mesaAtual] || [];
+      const comandaIndex = comandaMesa.findIndex((c) => c.orderId === orderId);
+
+      if (comandaIndex === -1) {
+        alert("Comanda não encontrada");
+        return;
+      }
+
+      const comandaAtual = comandaMesa[comandaIndex];
+      const itens = comandaAtual.items || [];
+      const existe = itens.find((i) => i.id === produto.id);
+
+      let novosItens;
+
+      if (existe) {
+        // Se já existe, incrementa quantidade
+        novosItens = itens.map((i) =>
+          i.id === produto.id ? { ...i, qtd: i.qtd + 1 } : i,
+        );
+      } else {
+        // Se não existe, adiciona novo com orderItemId
+        novosItens = [
+          ...itens,
+          {
+            id: produto.id,
+            orderItemId: novoOrderItem?.id, // GUARDA O order_item_id
+            name: produto.name,
+            product_code: produto.product_code,
+            price: Number(produto.price),
+            qtd: 1,
+          },
+        ];
+      }
+
+      const novasComandas = [...comandaMesa];
+      novasComandas[comandaIndex] = { ...comandaAtual, items: novosItens };
+
+      setComandas((prev) => ({
+        ...prev,
+        [mesaAtual]: novasComandas,
+      }));
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao adicionar item");
+    }
+  };
+
+  const alterarQtd = async (orderId, productId, delta, orderItemId) => {
+    if (!orderItemId) {
+      console.error("orderItemId é undefined!");
+      alert("Erro: ID do item não encontrado. Recarregue a página.");
+      return;
+    }
+
+    const comandaMesa = comandas[mesaAtual] || [];
+    const comandaIndex = comandaMesa.findIndex((c) => c.orderId === orderId);
+
+    if (comandaIndex === -1) return;
+
+    const comandaAtual = comandaMesa[comandaIndex];
+    const itemEncontrado = comandaAtual.items.find((i) => i.id === productId);
+
+    if (!itemEncontrado) return;
+
+    const novaQuantidade = itemEncontrado.qtd + delta;
+
+    try {
+      if (novaQuantidade > 0) {
+        // Usar orderItemId para atualizar
+        const response = await fetch(
+          `http://localhost:8000/api/order-items/${orderItemId}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              quantity: novaQuantidade,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          alert("Erro ao atualizar quantidade");
+          return;
+        }
+      } else {
+        // Usar orderItemId para deletar
+        const response = await fetch(
+          `http://localhost:8000/api/order-items/${orderItemId}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error("Erro detalhado:", errorData);
+          alert("Erro ao remover item");
+          return;
+        }
+      }
+
+      // Atualizar frontend
+      const itens = comandaAtual.items || [];
+      const novosItens = itens
+        .map((item) =>
+          item.id === productId ? { ...item, qtd: item.qtd + delta } : item,
+        )
+        .filter((item) => item.qtd > 0);
+
+      const novasComandas = [...comandaMesa];
+      novasComandas[comandaIndex] = { ...comandaAtual, items: novosItens };
+
+      setComandas((prev) => ({
+        ...prev,
+        [mesaAtual]: novasComandas,
+      }));
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao atualizar quantidade");
+    }
+  };
+
+  const finalizarComanda = async (orderId) => {
+    const order = getOrderById(orderId);
+    if (!order) return;
+
+    const comandaMesa = comandas[mesaAtual] || [];
+    const comandaIndex = comandaMesa.findIndex((c) => c.orderId === orderId);
+    if (comandaIndex === -1) return;
+
+    const comandaAtual = comandaMesa[comandaIndex];
+    const totalComanda = comandaAtual.items.reduce(
+      (sum, i) => sum + i.price * i.qtd,
+      0,
+    );
+
+    if (comandaAtual.items.length === 0) {
+      alert("Adicione itens à comanda");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/orders/${orderId}/close`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
         },
       );
 
@@ -232,72 +488,53 @@ export default function PDV() {
       }
 
       setOrders((prev) =>
-        prev.map((o) => (o.id === order.id ? { ...o, status: "fechado" } : o)),
+        prev.map((o) => (o.id === orderId ? { ...o, status: "fechado" } : o)),
       );
 
-      setComandas({ ...comandas, [mesaAtual]: [] });
+      const novasComandas = comandaMesa.filter((c) => c.orderId !== orderId);
+      setComandas((prev) => ({
+        ...prev,
+        [mesaAtual]: novasComandas,
+      }));
 
-      alert(`Comanda finalizada! Total: R$ ${total.toFixed(2)}`);
-      setModalFinalizar(false);
-      if (isMobile) {
-        setActivePanel("mesas");
+      alert(
+        `Comanda de ${comandaAtual.customerName} finalizada! Total: R$ ${totalComanda.toFixed(2)}`,
+      );
+
+      if (comandaSelecionada === orderId) {
+        setComandaSelecionada(
+          novasComandas.length > 0 ? novasComandas[0].orderId : null,
+        );
       }
+
+      setModalFinalizar(false);
     } catch (error) {
       console.error(error);
       alert("Erro ao finalizar comanda");
     }
   };
 
-  const addItem = (produto) => {
+  const handleAddItemClick = (produto) => {
     if (!mesaAtual) {
       alert("Selecione uma mesa primeiro");
       return;
     }
 
-    const order = getOrderByMesa(mesaAtual);
+    const comandasDaMesa = comandas[mesaAtual] || [];
 
-    if (!order) {
-      alert("Abra uma comanda primeiro");
+    if (comandasDaMesa.length === 0) {
+      alert(
+        "Nenhuma comanda aberta para esta mesa. Abra uma comanda primeiro!",
+      );
       return;
     }
 
-    const itens = comandas[mesaAtual] || [];
-    const existe = itens.find((i) => i.id === produto.id);
-
-    let novos;
-
-    if (existe) {
-      novos = itens.map((i) =>
-        i.id === produto.id ? { ...i, qtd: i.qtd + 1 } : i,
-      );
+    if (comandasDaMesa.length === 1) {
+      addItem(produto, comandasDaMesa[0].orderId);
     } else {
-      novos = [
-        ...itens,
-        {
-          id: produto.id,
-          name: produto.name,
-          price: Number(produto.price),
-          qtd: 1,
-        },
-      ];
+      setProdutoPendente(produto);
+      setShowSelectComanda(true);
     }
-
-    setComandas((prev) => ({ ...prev, [mesaAtual]: novos }));
-  };
-
-  const alterarQtd = (id, delta) => {
-    const itens = comandas[mesaAtual] || [];
-
-    const novos = itens
-      .map((item) =>
-        item.id === id ? { ...item, qtd: item.qtd + delta } : item,
-      )
-      .filter((item) => item.qtd > 0);
-
-    setComandas((prev) => ({
-      ...prev,
-      [mesaAtual]: novos,
-    }));
   };
 
   const handleMenuClick = (event, mesa) => {
@@ -309,14 +546,234 @@ export default function PDV() {
     setMenuMesa(menuMesa === mesa ? null : mesa);
   };
 
-  const comanda = comandas[mesaAtual] || [];
-  const total = comanda.reduce((sum, i) => sum + i.price * i.qtd, 0);
-
-  const produtosFiltrados = produtos.filter((produto) =>
-    produto.name.toLowerCase().includes(filtroProduto.toLowerCase()),
+  const comandaSelecionadaItems = comandaSelecionada
+    ? getComandaItems(mesaAtual, comandaSelecionada)
+    : [];
+  const total = comandaSelecionadaItems.reduce(
+    (sum, i) => sum + i.price * i.qtd,
+    0,
   );
 
+  const produtosFiltrados = produtos.filter((produto) => {
+    const searchTerm = filtroProduto.toLowerCase();
+    const matchesName = produto.name.toLowerCase().includes(searchTerm);
+    const matchesCode =
+      produto.product_code &&
+      produto.product_code.toLowerCase().includes(searchTerm);
+    return matchesName || matchesCode;
+  });
+
+  const comandasDaMesaAtual = comandas[mesaAtual] || [];
+
+  // Modal para abrir comanda com nome
+  const ModalAbrirComanda = ({ mesaNome, onClose }) => {
+    const numeroMesa = mesaNome?.replace("mesa-", "");
+
+    return (
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+        }}
+        onClick={onClose}
+      >
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 24,
+            width: "90%",
+            maxWidth: 400,
+            boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <h2 style={{ margin: 0, fontSize: 24 }}>Abrir Comanda</h2>
+            <p style={{ margin: "8px 0 0", color: "#6b7280" }}>
+              Mesa {numeroMesa}
+            </p>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 8,
+                fontSize: 14,
+                fontWeight: 500,
+              }}
+            >
+              Nome do cliente:
+            </label>
+            <input
+              type="text"
+              value={nomeComanda}
+              onChange={(e) => setNomeComanda(e.target.value)}
+              placeholder="Ex: João, Maria, Família Silva..."
+              autoFocus
+              style={{
+                width: "100%",
+                padding: "10px",
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+                fontSize: 14,
+                outline: "none",
+              }}
+              onKeyPress={(e) =>
+                e.key === "Enter" && abrirComanda(mesaNome, nomeComanda)
+              }
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 12 }}>
+            <button
+              onClick={onClose}
+              style={{
+                flex: 1,
+                padding: "10px",
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+                background: "#fff",
+                color: "#374151",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => abrirComanda(mesaNome, nomeComanda)}
+              style={{
+                flex: 1,
+                padding: "10px",
+                borderRadius: 8,
+                border: "none",
+                background: "#10b981",
+                color: "#fff",
+                fontWeight: "bold",
+                cursor: "pointer",
+              }}
+            >
+              Abrir
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Modal para selecionar comanda ao adicionar item
+  const ModalSelectComanda = ({ onClose }) => {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+        }}
+        onClick={onClose}
+      >
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 24,
+            width: "90%",
+            maxWidth: 400,
+            boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Selecionar Comanda</h2>
+            <p style={{ margin: "8px 0 0", color: "#6b7280", fontSize: 14 }}>
+              Para qual comanda deseja adicionar?
+            </p>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {comandasDaMesaAtual.map((comanda) => (
+              <button
+                key={comanda.orderId}
+                onClick={() => {
+                  addItem(produtoPendente, comanda.orderId);
+                  setShowSelectComanda(false);
+                  setProdutoPendente(null);
+                }}
+                style={{
+                  padding: "12px",
+                  borderRadius: 8,
+                  border: "1px solid #e5e7eb",
+                  background: "#f9fafb",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#f3f4f6";
+                  e.currentTarget.style.borderColor = "#10b981";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#f9fafb";
+                  e.currentTarget.style.borderColor = "#e5e7eb";
+                }}
+              >
+                <div style={{ fontWeight: "bold", fontSize: 16 }}>
+                  {comanda.customerName}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  {comanda.items?.length || 0} itens | R${" "}
+                  {(comanda.items || [])
+                    .reduce((sum, i) => sum + i.price * i.qtd, 0)
+                    .toFixed(2)}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={onClose}
+            style={{
+              width: "100%",
+              marginTop: 16,
+              padding: "10px",
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+              color: "#374151",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Modal de finalizar comanda
   const ModalFinalizarComanda = ({ onClose }) => {
+    const comandaAtual = comandasDaMesaAtual.find(
+      (c) => c.orderId === comandaSelecionada,
+    );
+
     return (
       <div
         style={{
@@ -347,7 +804,8 @@ export default function PDV() {
           <div style={{ textAlign: "center", marginBottom: 20 }}>
             <h2 style={{ margin: 0, fontSize: 24 }}>Finalizar Comanda</h2>
             <p style={{ margin: "8px 0 0", color: "#6b7280" }}>
-              Mesa {mesaAtual?.replace("mesa-", "")}
+              Mesa {mesaAtual?.replace("mesa-", "")} -{" "}
+              {comandaAtual?.customerName}
             </p>
           </div>
 
@@ -368,7 +826,9 @@ export default function PDV() {
                 }}
               >
                 <span style={{ fontSize: 14 }}>Total de itens:</span>
-                <span style={{ fontWeight: "bold" }}>{comanda.length}</span>
+                <span style={{ fontWeight: "bold" }}>
+                  {comandaSelecionadaItems.length}
+                </span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 14 }}>Valor total:</span>
@@ -401,7 +861,7 @@ export default function PDV() {
               Cancelar
             </button>
             <button
-              onClick={finalizarComanda}
+              onClick={() => finalizarComanda(comandaSelecionada)}
               style={{
                 flex: 1,
                 padding: "10px",
@@ -421,7 +881,8 @@ export default function PDV() {
     );
   };
 
-  const ComandaItem = ({ item }) => (
+  // 📦 Componente de item da comanda com código do produto e orderItemId
+  const ComandaItemComponent = ({ item, orderId }) => (
     <div
       style={{
         display: "flex",
@@ -432,15 +893,29 @@ export default function PDV() {
         background: "#f9fafb",
         borderRadius: 6,
         fontSize: isMobile ? 14 : 13,
+        flexWrap: "wrap",
+        gap: 8,
       }}
     >
-      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+      <div
+        style={{ flex: 2, display: "flex", flexDirection: "column", gap: 2 }}
+      >
         <span style={{ fontWeight: 500 }}>{item.name}</span>
+        {item.product_code && (
+          <span style={{ fontSize: 10, color: "#9ca3af" }}>
+            Cód: {item.product_code}
+          </span>
+        )}
+        {item.orderItemId && (
+          <span style={{ fontSize: 9, color: "#6b7280" }}>
+            ID: {item.orderItemId}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "#6b7280", fontSize: isMobile ? 12 : 11 }}>
           R$ {item.price.toFixed(2)}
         </span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span
           style={{
             fontWeight: "bold",
@@ -453,7 +928,7 @@ export default function PDV() {
         </span>
         <div style={{ display: "flex", gap: 6 }}>
           <button
-            onClick={() => alterarQtd(item.id, -1)}
+            onClick={() => alterarQtd(orderId, item.id, -1, item.orderItemId)}
             style={{
               width: isMobile ? 32 : 22,
               height: isMobile ? 32 : 22,
@@ -472,7 +947,7 @@ export default function PDV() {
             -
           </button>
           <button
-            onClick={() => alterarQtd(item.id, 1)}
+            onClick={() => alterarQtd(orderId, item.id, 1, item.orderItemId)}
             style={{
               width: isMobile ? 32 : 22,
               height: isMobile ? 32 : 22,
@@ -492,6 +967,99 @@ export default function PDV() {
           </button>
         </div>
       </div>
+    </div>
+  );
+
+  // 📦 Card de produto com código
+  const ProductCard = ({ produto }) => {
+    const comandaAberta = comandasDaMesaAtual.length > 0;
+    return (
+      <div
+        onClick={() => comandaAberta && handleAddItemClick(produto)}
+        style={{
+          cursor: comandaAberta ? "pointer" : "not-allowed",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: isMobile ? "12px" : "8px 12px",
+          background: "#fff",
+          borderRadius: 6,
+          border: "1px solid #e5e7eb",
+          opacity: comandaAberta ? 1 : 0.5,
+          transition: "all 0.2s",
+          gap: 8,
+        }}
+        onMouseEnter={(e) => {
+          if (comandaAberta) {
+            e.currentTarget.style.background = "#f9fafb";
+            e.currentTarget.style.borderColor = "#10b981";
+            if (!isMobile) e.currentTarget.style.transform = "translateX(4px)";
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (comandaAberta) {
+            e.currentTarget.style.background = "#fff";
+            e.currentTarget.style.borderColor = "#e5e7eb";
+            if (!isMobile) e.currentTarget.style.transform = "translateX(0)";
+          }
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: isMobile ? 14 : 13, fontWeight: 500 }}>
+            {produto.name}
+          </div>
+          {produto.product_code && (
+            <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+              {produto.product_code}
+            </div>
+          )}
+        </div>
+        <span
+          style={{
+            color: "#059669",
+            fontWeight: "bold",
+            fontSize: isMobile ? 14 : 13,
+          }}
+        >
+          R$ {Number(produto.price).toFixed(2)}
+        </span>
+      </div>
+    );
+  };
+
+  // Selector de comanda
+  const ComandaSelector = () => (
+    <div style={{ marginBottom: 12 }}>
+      <label
+        style={{
+          fontSize: 12,
+          color: "#6b7280",
+          marginBottom: 4,
+          display: "block",
+        }}
+      >
+        Comanda:
+      </label>
+      <select
+        value={comandaSelecionada || ""}
+        onChange={(e) => setComandaSelecionada(Number(e.target.value))}
+        style={{
+          width: "100%",
+          padding: "8px",
+          borderRadius: 6,
+          border: "1px solid #e5e7eb",
+          fontSize: 13,
+          background: "#fff",
+          cursor: "pointer",
+        }}
+      >
+        <option value="">Selecione uma comanda</option>
+        {comandasDaMesaAtual.map((comanda) => (
+          <option key={comanda.orderId} value={comanda.orderId}>
+            {comanda.customerName} - {comanda.items?.length || 0} itens
+          </option>
+        ))}
+      </select>
     </div>
   );
 
@@ -552,7 +1120,7 @@ export default function PDV() {
         }}
       >
         Comanda
-        {comanda.length > 0 && (
+        {comandaSelecionada && comandaSelecionadaItems.length > 0 && (
           <span
             style={{
               position: "absolute",
@@ -569,7 +1137,7 @@ export default function PDV() {
               justifyContent: "center",
             }}
           >
-            {comanda.length}
+            {comandaSelecionadaItems.length}
           </span>
         )}
       </button>
@@ -653,16 +1221,22 @@ export default function PDV() {
               return numA - numB;
             })
             .map((mesa) => {
-              const order = getOrderByMesa(mesa);
-              const ocupada = !!order && order.status === "aberto";
+              const comandasDaMesa = comandas[mesa] || [];
+              const ocupada = comandasDaMesa.length > 0;
               const isActive = mesaAtual === mesa;
-              const itensCount = comandas[mesa]?.length || 0;
               const numeroMesa = mesa.replace("mesa-", "");
 
               return (
                 <div
                   key={mesa}
-                  onClick={() => setMesaAtual(mesa)}
+                  onClick={() => {
+                    setMesaAtual(mesa);
+                    setComandaSelecionada(
+                      comandasDaMesa.length > 0
+                        ? comandasDaMesa[0].orderId
+                        : null,
+                    );
+                  }}
                   style={{
                     position: "relative",
                     background: isActive
@@ -701,11 +1275,11 @@ export default function PDV() {
                   >
                     {numeroMesa.padStart(2, "0")}
                   </div>
-                  {ocupada && itensCount > 0 && (
+                  {ocupada && (
                     <div
                       style={{ fontSize: 9, color: "#9ca3af", marginTop: 2 }}
                     >
-                      {itensCount}
+                      {comandasDaMesa.length} comanda(s)
                     </div>
                   )}
                   <div
@@ -747,12 +1321,8 @@ export default function PDV() {
         }}
       >
         <div style={{ fontSize: 11, color: "#9ca3af", textAlign: "center" }}>
-          Total: {Object.keys(comandas).length} | Ocup:{" "}
-          {
-            Object.keys(comandas).filter(
-              (m) => getOrderByMesa(m)?.status === "aberto",
-            ).length
-          }
+          Total: {Object.keys(comandas).length} | Comandas:{" "}
+          {Object.values(comandas).reduce((sum, c) => sum + c.length, 0)}
         </div>
       </div>
     </div>
@@ -813,10 +1383,9 @@ export default function PDV() {
             return numA - numB;
           })
           .map((mesa) => {
-            const order = getOrderByMesa(mesa);
-            const ocupada = !!order && order.status === "aberto";
+            const comandasDaMesa = comandas[mesa] || [];
+            const ocupada = comandasDaMesa.length > 0;
             const isActive = mesaAtual === mesa;
-            const itensCount = comandas[mesa]?.length || 0;
             const numeroMesa = mesa.replace("mesa-", "");
 
             return (
@@ -824,6 +1393,11 @@ export default function PDV() {
                 key={mesa}
                 onClick={() => {
                   setMesaAtual(mesa);
+                  setComandaSelecionada(
+                    comandasDaMesa.length > 0
+                      ? comandasDaMesa[0].orderId
+                      : null,
+                  );
                   setActivePanel("cardapio");
                 }}
                 style={{
@@ -862,9 +1436,9 @@ export default function PDV() {
                 >
                   {numeroMesa.padStart(2, "0")}
                 </div>
-                {ocupada && itensCount > 0 && (
+                {ocupada && (
                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>
-                    {itensCount} itens
+                    {comandasDaMesa.length} comanda(s)
                   </div>
                 )}
                 <div
@@ -914,7 +1488,7 @@ export default function PDV() {
         </div>
         <input
           type="text"
-          placeholder="Buscar produto..."
+          placeholder="Buscar por nome ou código..."
           value={filtroProduto}
           onChange={(e) => setFiltroProduto(e.target.value)}
           style={{
@@ -935,7 +1509,6 @@ export default function PDV() {
             (p) => p.category?.id === cat.id,
           );
           if (produtosCategoria.length === 0) return null;
-
           return (
             <div key={cat.id} style={{ marginBottom: 20 }}>
               <h3
@@ -952,47 +1525,16 @@ export default function PDV() {
                 {cat.name}
               </h3>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {produtosCategoria.map((p) => {
-                  const comandaAberta =
-                    getOrderByMesa(mesaAtual)?.status === "aberto";
-                  return (
-                    <div
-                      key={p.id}
-                      onClick={() => comandaAberta && addItem(p)}
-                      style={{
-                        cursor: comandaAberta ? "pointer" : "not-allowed",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        padding: "12px",
-                        background: "#fff",
-                        borderRadius: 8,
-                        border: "1px solid #e5e7eb",
-                        opacity: comandaAberta ? 1 : 0.5,
-                      }}
-                    >
-                      <span style={{ fontSize: 14, fontWeight: 500 }}>
-                        {p.name}
-                      </span>
-                      <span
-                        style={{
-                          color: "#059669",
-                          fontWeight: "bold",
-                          fontSize: 14,
-                        }}
-                      >
-                        R$ {Number(p.price).toFixed(2)}
-                      </span>
-                    </div>
-                  );
-                })}
+                {produtosCategoria.map((p) => (
+                  <ProductCard key={p.id} produto={p} />
+                ))}
               </div>
             </div>
           );
         })}
       </div>
 
-      {mesaAtual && getOrderByMesa(mesaAtual)?.status !== "aberto" && (
+      {comandasDaMesaAtual.length === 0 && mesaAtual && (
         <div
           style={{
             marginTop: 12,
@@ -1030,14 +1572,15 @@ export default function PDV() {
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Comanda</h2>
         <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>
           Mesa {mesaAtual?.replace("mesa-", "") || "?"}
-          {getOrderByMesa(mesaAtual)?.status === "aberto" && (
-            <span style={{ color: "#10b981", marginLeft: 8 }}>● Aberta</span>
-          )}
         </p>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-        {comanda.length === 0 ? (
+      <div style={{ padding: "12px" }}>
+        <ComandaSelector />
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 12px 12px 12px" }}>
+        {!comandaSelecionada ? (
           <div
             style={{
               textAlign: "center",
@@ -1046,13 +1589,28 @@ export default function PDV() {
             }}
           >
             <div style={{ fontSize: 48, marginBottom: 12 }}>📋</div>
+            <p style={{ fontSize: 14 }}>Selecione uma comanda</p>
+          </div>
+        ) : comandaSelecionadaItems.length === 0 ? (
+          <div
+            style={{
+              textAlign: "center",
+              color: "#9ca3af",
+              padding: "40px 20px",
+            }}
+          >
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🛒</div>
             <p style={{ fontSize: 14 }}>Nenhum item</p>
-            <p style={{ fontSize: 12 }}>
-              Selecione uma mesa e adicione produtos
-            </p>
+            <p style={{ fontSize: 12 }}>Adicione produtos do cardápio</p>
           </div>
         ) : (
-          comanda.map((item) => <ComandaItem key={item.id} item={item} />)
+          comandaSelecionadaItems.map((item) => (
+            <ComandaItemComponent
+              key={item.id}
+              item={item}
+              orderId={comandaSelecionada}
+            />
+          ))
         )}
       </div>
 
@@ -1080,22 +1638,16 @@ export default function PDV() {
           style={{
             width: "100%",
             padding: "12px",
-            background:
-              getOrderByMesa(mesaAtual)?.status === "aberto"
-                ? "#10b981"
-                : "#9ca3af",
+            background: comandaSelecionada ? "#10b981" : "#9ca3af",
             color: "#fff",
             border: "none",
             borderRadius: 8,
             fontWeight: "bold",
-            cursor:
-              getOrderByMesa(mesaAtual)?.status === "aberto"
-                ? "pointer"
-                : "not-allowed",
+            cursor: comandaSelecionada ? "pointer" : "not-allowed",
             fontSize: 16,
           }}
-          onClick={() => setModalFinalizar(true)}
-          disabled={getOrderByMesa(mesaAtual)?.status !== "aberto"}
+          onClick={() => comandaSelecionada && setModalFinalizar(true)}
+          disabled={!comandaSelecionada}
         >
           Finalizar Comanda
         </button>
@@ -1147,7 +1699,7 @@ export default function PDV() {
               </h2>
               <input
                 type="text"
-                placeholder="Buscar produto..."
+                placeholder="Buscar por nome ou código..."
                 value={filtroProduto}
                 onChange={(e) => setFiltroProduto(e.target.value)}
                 style={{
@@ -1168,7 +1720,6 @@ export default function PDV() {
                   (p) => p.category?.id === cat.id,
                 );
                 if (produtosCategoria.length === 0) return null;
-
                 return (
                   <div key={cat.id} style={{ marginBottom: 16 }}>
                     <h3
@@ -1191,64 +1742,16 @@ export default function PDV() {
                         gap: 4,
                       }}
                     >
-                      {produtosCategoria.map((p) => {
-                        const comandaAberta =
-                          getOrderByMesa(mesaAtual)?.status === "aberto";
-                        return (
-                          <div
-                            key={p.id}
-                            onClick={() => comandaAberta && addItem(p)}
-                            style={{
-                              cursor: comandaAberta ? "pointer" : "not-allowed",
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              padding: "8px 12px",
-                              background: "#fff",
-                              borderRadius: 6,
-                              border: "1px solid #e5e7eb",
-                              opacity: comandaAberta ? 1 : 0.5,
-                              transition: "all 0.2s",
-                            }}
-                            onMouseEnter={(e) => {
-                              if (comandaAberta) {
-                                e.currentTarget.style.background = "#f9fafb";
-                                e.currentTarget.style.borderColor = "#10b981";
-                                e.currentTarget.style.transform =
-                                  "translateX(4px)";
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (comandaAberta) {
-                                e.currentTarget.style.background = "#fff";
-                                e.currentTarget.style.borderColor = "#e5e7eb";
-                                e.currentTarget.style.transform =
-                                  "translateX(0)";
-                              }
-                            }}
-                          >
-                            <span style={{ fontSize: 13, fontWeight: 500 }}>
-                              {p.name}
-                            </span>
-                            <span
-                              style={{
-                                color: "#059669",
-                                fontWeight: 600,
-                                fontSize: 13,
-                              }}
-                            >
-                              R$ {Number(p.price).toFixed(2)}
-                            </span>
-                          </div>
-                        );
-                      })}
+                      {produtosCategoria.map((p) => (
+                        <ProductCard key={p.id} produto={p} />
+                      ))}
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            {mesaAtual && getOrderByMesa(mesaAtual)?.status !== "aberto" && (
+            {comandasDaMesaAtual.length === 0 && mesaAtual && (
               <div
                 style={{
                   marginTop: 12,
@@ -1288,16 +1791,21 @@ export default function PDV() {
               </h2>
               <p style={{ margin: "2px 0 0", fontSize: 11, color: "#6b7280" }}>
                 Mesa {mesaAtual?.replace("mesa-", "") || "?"}
-                {getOrderByMesa(mesaAtual)?.status === "aberto" && (
-                  <span style={{ color: "#10b981", marginLeft: 8 }}>
-                    Aberta
-                  </span>
-                )}
               </p>
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
-              {comanda.length === 0 ? (
+            <div style={{ padding: "12px" }}>
+              <ComandaSelector />
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                padding: "0 12px 12px 12px",
+              }}
+            >
+              {!comandaSelecionada ? (
                 <div
                   style={{
                     textAlign: "center",
@@ -1306,10 +1814,27 @@ export default function PDV() {
                   }}
                 >
                   <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
+                  <p style={{ fontSize: 12 }}>Selecione uma comanda</p>
+                </div>
+              ) : comandaSelecionadaItems.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    color: "#9ca3af",
+                    padding: "30px 12px",
+                  }}
+                >
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🛒</div>
                   <p style={{ fontSize: 12 }}>Nenhum item</p>
                 </div>
               ) : (
-                comanda.map((item) => <ComandaItem key={item.id} item={item} />)
+                comandaSelecionadaItems.map((item) => (
+                  <ComandaItemComponent
+                    key={item.id}
+                    item={item}
+                    orderId={comandaSelecionada}
+                  />
+                ))
               )}
             </div>
 
@@ -1340,24 +1865,18 @@ export default function PDV() {
                 style={{
                   width: "100%",
                   padding: "8px",
-                  background:
-                    getOrderByMesa(mesaAtual)?.status === "aberto"
-                      ? "#10b981"
-                      : "#9ca3af",
+                  background: comandaSelecionada ? "#10b981" : "#9ca3af",
                   color: "#fff",
                   border: "none",
                   borderRadius: 6,
                   fontWeight: 600,
-                  cursor:
-                    getOrderByMesa(mesaAtual)?.status === "aberto"
-                      ? "pointer"
-                      : "not-allowed",
+                  cursor: comandaSelecionada ? "pointer" : "not-allowed",
                   fontSize: 13,
                 }}
-                onClick={() => setModalFinalizar(true)}
-                disabled={getOrderByMesa(mesaAtual)?.status !== "aberto"}
+                onClick={() => comandaSelecionada && setModalFinalizar(true)}
+                disabled={!comandaSelecionada}
               >
-                Finalizar
+                Finalizar Comanda
               </button>
             </div>
           </div>
@@ -1383,7 +1902,7 @@ export default function PDV() {
         >
           <div
             onClick={() => {
-              abrirComanda(menuMesa);
+              setModalAbrirComanda(menuMesa);
               setMenuMesa(null);
             }}
             style={{
@@ -1396,7 +1915,7 @@ export default function PDV() {
               (e.currentTarget.style.background = "transparent")
             }
           >
-            Abrir Comanda
+            Nova Comanda
           </div>
           <div
             onClick={() => {
@@ -1419,7 +1938,21 @@ export default function PDV() {
         </div>
       )}
 
-      {/* Modal Finalizar */}
+      {/* Modals */}
+      {modalAbrirComanda && (
+        <ModalAbrirComanda
+          mesaNome={modalAbrirComanda}
+          onClose={() => setModalAbrirComanda(null)}
+        />
+      )}
+      {showSelectComanda && (
+        <ModalSelectComanda
+          onClose={() => {
+            setShowSelectComanda(false);
+            setProdutoPendente(null);
+          }}
+        />
+      )}
       {modalFinalizar && (
         <ModalFinalizarComanda onClose={() => setModalFinalizar(false)} />
       )}
