@@ -13,6 +13,7 @@ class Order extends Model
         'customer_name',
         'status',
         'total',
+        'payment_method',
         'closed_at'
     ];
 

@@ -15,17 +15,22 @@ return new class extends Migration
             $table->id();
             $table->foreignId('restaurant_id')->constrained()->cascadeOnDelete();
             $table->foreignId('table_id')->constrained()->cascadeOnDelete();
+            $table->string('customer_name', 100)->nullable(); // Nome do cliente
 
-            $table->enum('status', [
-                'aberto',
-                'preparando',
-                'pronto',
-                'entregue',
-                'finalizado'
-            ])->default('aberto');
+            // ✅ VARCHAR em vez de ENUM (mais flexível)
+            $table->string('status', 50)->default('aberto');
 
             $table->decimal('total', 10, 2)->default(0);
+
+            // ✅ VARCHAR para forma de pagamento
+            $table->string('payment_method', 50)->nullable();
+
+            $table->timestamp('closed_at')->nullable();
             $table->timestamps();
+
+            // Índices para otimizar consultas
+            $table->index(['restaurant_id', 'status']);
+            $table->index(['table_id', 'status']);
         });
     }
 

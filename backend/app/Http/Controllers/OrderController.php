@@ -195,8 +195,8 @@ class OrderController extends Controller
         }
     }
 
-    // 💰 FECHAR COMANDA
-    public function close($id)
+    // 💰 FECHAR COMANDA (COM FORMA DE PAGAMENTO)
+    public function close(Request $request, $id)
     {
         try {
             $order = Order::findOrFail($id);
@@ -205,9 +205,23 @@ class OrderController extends Controller
                 return response()->json(['message' => 'Comanda já está finalizada'], 400);
             }
 
+            $data = $request->validate([
+                'payment_method' => 'required|string|in:dinheiro,pix,credito,debito',
+                'total' => 'nullable|numeric|min:0'
+            ]);
+
+            // LOG PARA DEBUG
+            \Log::info('Finalizando comanda:', [
+                'order_id' => $id,
+                'payment_method' => $data['payment_method'],
+                'total' => $data['total'] ?? $order->total
+            ]);
+
             $order->update([
                 'status' => 'fechado',
-                'closed_at' => now()
+                'closed_at' => now(),
+                'payment_method' => $data['payment_method'], // ← VERIFIQUE ESTA LINHA
+                'total' => $data['total'] ?? $order->total
             ]);
 
             return response()->json([
@@ -215,13 +229,13 @@ class OrderController extends Controller
                 'order' => $order
             ]);
         } catch (\Exception $e) {
+            \Log::error('Erro ao finalizar comanda: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Erro ao finalizar comanda',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
-
     // ❌ CANCELAR COMANDA
     public function destroy($id)
     {

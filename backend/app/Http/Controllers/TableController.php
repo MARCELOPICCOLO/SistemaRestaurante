@@ -1,4 +1,5 @@
 <?php
+// app/Http/Controllers/TableController.php
 
 namespace App\Http\Controllers;
 
@@ -12,9 +13,9 @@ class TableController extends Controller
     {
         $restaurantId = $request->query('restaurant_id');
 
-        $tables = Table::when($restaurantId, function ($query) use ($restaurantId) {
-            $query->where('restaurant_id', $restaurantId);
-        })->get();
+        $tables = Table::where('restaurant_id', $restaurantId)
+            ->orderBy('number', 'asc')
+            ->get();
 
         return response()->json($tables);
     }
@@ -24,23 +25,29 @@ class TableController extends Controller
     {
         $data = $request->validate([
             'restaurant_id' => 'required|exists:restaurants,id',
-            'number'        => 'required|integer',
-            'active'        => 'boolean'
+            'number' => 'required|integer|min:1'
         ]);
 
-        // 🔥 gera QR único
-        $data['qr_code_hash'] = md5(uniqid());
+        // ✅ VERIFICAR SE JÁ EXISTE MESA COM ESTE NÚMERO
+        $existingTable = Table::where('restaurant_id', $data['restaurant_id'])
+            ->where('number', $data['number'])
+            ->first();
+
+        if ($existingTable) {
+            return response()->json([
+                'message' => 'Já existe uma mesa com o número ' . $data['number'] . ' neste restaurante'
+            ], 409); // 409 Conflict
+        }
 
         $table = Table::create($data);
 
         return response()->json($table, 201);
     }
 
-    // 🔍 MOSTRAR UMA MESA
+    // 🔍 MOSTRAR MESA
     public function show($id)
     {
         $table = Table::findOrFail($id);
-
         return response()->json($table);
     }
 
@@ -50,24 +57,39 @@ class TableController extends Controller
         $table = Table::findOrFail($id);
 
         $data = $request->validate([
-            'number' => 'sometimes|integer',
-            'active' => 'sometimes|boolean'
+            'number' => 'sometimes|integer|min:1'
         ]);
 
-        $table->update($data);
+        // ✅ VERIFICAR SE OUTRA MESA JÁ TEM ESTE NÚMERO
+        if (isset($data['number'])) {
+            $existingTable = Table::where('restaurant_id', $table->restaurant_id)
+                ->where('number', $data['number'])
+                ->where('id', '!=', $id)
+                ->first();
 
+            if ($existingTable) {
+                return response()->json([
+                    'message' => 'Já existe uma mesa com o número ' . $data['number'] . ' neste restaurante'
+                ], 409);
+            }
+        }
+
+        $table->update($data);
         return response()->json($table);
     }
 
     // ❌ DELETAR MESA
     public function destroy($id)
     {
-        $table = \App\Models\Table::with('orders')->findOrFail($id);
+        $table = Table::findOrFail($id);
 
-        if ($table->orders()->where('status', '!=', 'finalizado')->exists()) {
+        // Verificar se a mesa tem comandas abertas
+        $hasOpenOrders = $table->orders()->where('status', 'aberto')->exists();
+
+        if ($hasOpenOrders) {
             return response()->json([
-                'message' => 'Mesa possui pedidos em aberto'
-            ], 400);
+                'message' => 'Não é possível excluir a mesa pois ela possui comandas abertas'
+            ], 409);
         }
 
         $table->delete();

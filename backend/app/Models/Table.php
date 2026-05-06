@@ -1,4 +1,5 @@
 <?php
+// app/Models/Table.php
 
 namespace App\Models;
 
@@ -8,12 +9,9 @@ class Table extends Model
 {
     protected $fillable = [
         'restaurant_id',
-        'number',
-        'qr_code_hash',
-        'active'
+        'number'
     ];
 
-    // 🔗 Relacionamentos
     public function restaurant()
     {
         return $this->belongsTo(Restaurant::class);
