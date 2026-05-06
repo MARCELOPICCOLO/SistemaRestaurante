@@ -602,6 +602,58 @@ export default function PDV() {
     }
   };
 
+  // Adicione esta função no mesmo nível das outras funções (ex: ao lado de adicionarMesa, removerMesa, etc.)
+
+  const abrirComandaBalcao = async (mesaNome) => {
+    const mesa = mesas.find((m) => `mesa-${m.number}` === mesaNome);
+    if (!mesa) return;
+
+    try {
+      const response = await fetch("http://localhost:8000/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          restaurant_id: 1,
+          table_id: mesa.id,
+          customer_name: "Balcão",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.message || "Erro ao abrir comanda");
+        return;
+      }
+
+      const novaOrder = data.order || data;
+      setOrders((prev) => [...prev, novaOrder]);
+
+      setComandas((prev) => ({
+        ...prev,
+        [mesaNome]: [
+          ...(prev[mesaNome] || []),
+          { orderId: novaOrder.id, items: [], customerName: "Balcão" },
+        ],
+      }));
+
+      setMesaAtual(mesaNome);
+      setComandaSelecionada(novaOrder.id);
+
+      alert("Comanda do balcão aberta com sucesso!");
+
+      if (isMobile) {
+        setActivePanel("cardapio");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao abrir comanda do balcão");
+    }
+  };
+
   const comandaSelecionadaItems = comandaSelecionada
     ? getComandaItems(mesaAtual, comandaSelecionada)
     : [];
@@ -1268,206 +1320,239 @@ export default function PDV() {
     </div>
   );
 
-  // Sidebar Desktop
-  const SidebarDesktop = () => (
-    <div
-      style={{
-        background: "#1f2937",
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        width: "280px",
-      }}
-    >
-      <div style={{ padding: "16px", borderBottom: "1px solid #374151" }}>
-        <h1
-          style={{
-            margin: 0,
-            marginBottom: 12,
-            color: "#fff",
-            fontSize: 18,
-            fontWeight: 600,
-          }}
-        >
-          Mesas
-        </h1>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            type="number"
-            value={novaMesa}
-            onChange={(e) => setNovaMesa(e.target.value)}
-            placeholder="Nº"
+  const SidebarDesktop = () => {
+    // Função para lidar com clique na mesa
+    const handleMesaClick = async (mesa, comandasDaMesa) => {
+      const mesaObj = mesas.find((m) => `mesa-${m.number}` === mesa);
+      const isBalcao = mesaObj?.number === 0;
+
+      if (isBalcao) {
+        // Verificar se já tem comanda aberta no balcão
+        const comandaAberta = comandasDaMesa.find((c) => {
+          const order = orders.find((o) => o.id === c.orderId);
+          return order && order.status === "aberto";
+        });
+
+        if (comandaAberta) {
+          // Se já tem comanda aberta, apenas seleciona
+          setMesaAtual(mesa);
+          setComandaSelecionada(comandaAberta.orderId);
+        } else {
+          // Se não tem comanda aberta, abre uma nova
+          await abrirComandaBalcao(mesa);
+        }
+      } else {
+        // Mesa normal
+        setMesaAtual(mesa);
+        setComandaSelecionada(
+          comandasDaMesa.length > 0 ? comandasDaMesa[0].orderId : null,
+        );
+      }
+    };
+
+    return (
+      <div
+        style={{
+          background: "#1f2937",
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          width: "280px",
+        }}
+      >
+        <div style={{ padding: "16px", borderBottom: "1px solid #374151" }}>
+          <h1
             style={{
-              width: "70px",
-              padding: "6px 8px",
-              borderRadius: 4,
-              border: "1px solid #374151",
-              fontSize: 13,
-              outline: "none",
-              background: "#374151",
+              margin: 0,
+              marginBottom: 12,
               color: "#fff",
-              textAlign: "center",
-            }}
-            onKeyPress={(e) => e.key === "Enter" && adicionarMesa()}
-          />
-          <button
-            onClick={adicionarMesa}
-            style={{
-              flex: 1,
-              padding: "6px 8px",
-              borderRadius: 4,
-              border: "none",
-              background: "#10b981",
-              color: "#fff",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontSize: 12,
-              whiteSpace: "nowrap",
+              fontSize: 18,
+              fontWeight: 600,
             }}
           >
-            Adicionar
-          </button>
+            Mesas
+          </h1>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              type="number"
+              value={novaMesa}
+              onChange={(e) => setNovaMesa(e.target.value)}
+              placeholder="Nº"
+              style={{
+                width: "70px",
+                padding: "6px 8px",
+                borderRadius: 4,
+                border: "1px solid #374151",
+                fontSize: 13,
+                outline: "none",
+                background: "#374151",
+                color: "#fff",
+                textAlign: "center",
+              }}
+              onKeyPress={(e) => e.key === "Enter" && adicionarMesa()}
+            />
+            <button
+              onClick={adicionarMesa}
+              style={{
+                flex: 1,
+                padding: "6px 8px",
+                borderRadius: 4,
+                border: "none",
+                background: "#10b981",
+                color: "#fff",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Adicionar
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(70px, 1fr))",
-            gap: 8,
-          }}
-        >
-          {Object.keys(comandas)
-            .sort((a, b) => {
-              const numA = parseInt(a.replace("mesa-", ""));
-              const numB = parseInt(b.replace("mesa-", ""));
-              return numA - numB;
-            })
-            .map((mesa) => {
-              const comandasDaMesa = comandas[mesa] || [];
-              const ocupada = comandasDaMesa.length > 0;
-              const isActive = mesaAtual === mesa;
-              const numeroMesa = mesa.replace("mesa-", "");
-              const isBalcao = numeroMesa === "0" || numeroMesa === "00";
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(70px, 1fr))",
+              gap: 8,
+            }}
+          >
+            {Object.keys(comandas)
+              .sort((a, b) => {
+                const numA = parseInt(a.replace("mesa-", ""));
+                const numB = parseInt(b.replace("mesa-", ""));
+                return numA - numB;
+              })
+              .map((mesa) => {
+                const comandasDaMesa = comandas[mesa] || [];
+                const ocupada = comandasDaMesa.length > 0;
+                const isActive = mesaAtual === mesa;
+                const numeroMesa = mesa.replace("mesa-", "");
+                const isBalcao = numeroMesa === "0" || numeroMesa === "00";
 
-              return (
-                <div
-                  key={mesa}
-                  onClick={() => {
-                    setMesaAtual(mesa);
-                    setComandaSelecionada(
-                      comandasDaMesa.length > 0
-                        ? comandasDaMesa[0].orderId
-                        : null,
-                    );
-                  }}
-                  style={{
-                    position: "relative",
-                    background: isBalcao
-                      ? "#10b981"
-                      : isActive
-                        ? "#374151"
-                        : ocupada
+                // Verifica se tem comanda aberta no balcão
+                const temComandaAberta =
+                  isBalcao &&
+                  comandasDaMesa.some((c) => {
+                    const order = orders.find((o) => o.id === c.orderId);
+                    return order && order.status === "aberto";
+                  });
+
+                return (
+                  <div
+                    key={mesa}
+                    onClick={() => handleMesaClick(mesa, comandasDaMesa)}
+                    style={{
+                      position: "relative",
+                      background: isBalcao
+                        ? temComandaAberta
                           ? "#1e3a2f"
-                          : "#111827",
-                    borderRadius: 6,
-                    padding: "10px 4px",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                    border: isActive
-                      ? "1px solid #10b981"
-                      : "1px solid #374151",
-                    textAlign: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 4,
-                      right: 4,
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: ocupada ? "#10b981" : "#6b7280",
-                    }}
-                  />
-                  <div
-                    style={{
-                      fontSize: 16,
-                      fontWeight: "bold",
-                      color: "#fff",
-                      fontFamily: "monospace",
+                          : "#10b981"
+                        : isActive
+                          ? "#374151"
+                          : ocupada
+                            ? "#1e3a2f"
+                            : "#111827",
+                      borderRadius: 6,
+                      padding: "10px 4px",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      border: isActive
+                        ? "1px solid #10b981"
+                        : "1px solid #374151",
+                      textAlign: "center",
                     }}
                   >
-                    {isBalcao ? "" : numeroMesa.padStart(2, "0")}
-                  </div>
-                  {isBalcao && (
-                    <div
-                      style={{
-                        fontSize: 9,
-                        color: "#fff",
-                        marginTop: 2,
-                        opacity: 0.9,
-                      }}
-                    >
-                      Balcão
-                    </div>
-                  )}
-                  {!isBalcao && ocupada && (
-                    <div
-                      style={{ fontSize: 9, color: "#9ca3af", marginTop: 2 }}
-                    >
-                      {comandasDaMesa.length} comanda(s)
-                    </div>
-                  )}
-                  {!isBalcao && (
                     <div
                       style={{
                         position: "absolute",
-                        bottom: 2,
+                        top: 4,
                         right: 4,
-                        background: "rgba(0,0,0,0.6)",
-                        borderRadius: 3,
-                        width: 16,
-                        height: 16,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: ocupada ? "#10b981" : "#6b7280",
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleMenuClick(e, mesa);
+                    />
+                    <div
+                      style={{
+                        fontSize: 16,
+                        fontWeight: "bold",
+                        color: "#fff",
+                        fontFamily: "monospace",
                       }}
                     >
-                      <span
-                        style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}
-                      >
-                        ⋮
-                      </span>
+                      {isBalcao ? "" : numeroMesa.padStart(2, "0")}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    {isBalcao && (
+                      <div
+                        style={{
+                          fontSize: 9,
+                          color: "#fff",
+                          marginTop: 2,
+                          opacity: 0.9,
+                        }}
+                      >
+                        {temComandaAberta ? "Atendendo" : "Clique para iniciar"}
+                      </div>
+                    )}
+                    {!isBalcao && ocupada && (
+                      <div
+                        style={{ fontSize: 9, color: "#9ca3af", marginTop: 2 }}
+                      >
+                        {comandasDaMesa.length} comanda(s)
+                      </div>
+                    )}
+                    {!isBalcao && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          bottom: 2,
+                          right: 4,
+                          background: "rgba(0,0,0,0.6)",
+                          borderRadius: 3,
+                          width: 16,
+                          height: 16,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleMenuClick(e, mesa);
+                        }}
+                      >
+                        <span
+                          style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}
+                        >
+                          ⋮
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
         </div>
-      </div>
 
-      <div
-        style={{
-          padding: "10px 16px",
-          borderTop: "1px solid #374151",
-          background: "#111827",
-        }}
-      >
-        <div style={{ fontSize: 11, color: "#9ca3af", textAlign: "center" }}>
-          Total: {Object.keys(comandas).length} | Comandas:{" "}
-          {Object.values(comandas).reduce((sum, c) => sum + c.length, 0)}
+        <div
+          style={{
+            padding: "10px 16px",
+            borderTop: "1px solid #374151",
+            background: "#111827",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "#9ca3af", textAlign: "center" }}>
+            Total: {Object.keys(comandas).length} | Comandas:{" "}
+            {Object.values(comandas).reduce((sum, c) => sum + c.length, 0)}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Painel de Mesas Mobile
   const MesasMobile = () => (
