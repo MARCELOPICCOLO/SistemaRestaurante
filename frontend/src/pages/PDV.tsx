@@ -27,6 +27,9 @@ export default function PDV() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [activePanel, setActivePanel] = useState("mesas");
 
+  // EStado forma de pagamento
+  const [formaPagamento, setFormaPagamento] = useState("");
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -148,7 +151,12 @@ export default function PDV() {
       const data = await response.json();
 
       if (!response.ok) {
-        alert(data.message || "Erro ao criar mesa");
+        // ✅ TRATAR ERRO DE MESA DUPLICADA
+        if (response.status === 409) {
+          alert(data.message);
+        } else {
+          alert(data.message || "Erro ao criar mesa");
+        }
         return;
       }
 
@@ -161,6 +169,7 @@ export default function PDV() {
       setComandaSelecionada(null);
     } catch (error) {
       console.error(error);
+      alert("Erro ao conectar com o servidor");
     }
   };
 
@@ -451,7 +460,7 @@ export default function PDV() {
     }
   };
 
-  const finalizarComanda = async (orderId) => {
+  const finalizarComanda = async (orderId, formaPagamento) => {
     const order = getOrderById(orderId);
     if (!order) return;
 
@@ -470,6 +479,13 @@ export default function PDV() {
       return;
     }
 
+    if (!formaPagamento) {
+      alert("Selecione a forma de pagamento");
+      return;
+    }
+
+    const isBalcao = comandaAtual.customerName === "Balcão";
+
     try {
       const response = await fetch(
         `http://localhost:8000/api/orders/${orderId}/close`,
@@ -479,11 +495,16 @@ export default function PDV() {
             "Content-Type": "application/json",
             Accept: "application/json",
           },
+          body: JSON.stringify({
+            payment_method: formaPagamento,
+            total: totalComanda,
+          }),
         },
       );
 
       if (!response.ok) {
-        alert("Erro ao finalizar comanda");
+        const error = await response.json();
+        alert(error.message || "Erro ao finalizar comanda");
         return;
       }
 
@@ -492,13 +513,10 @@ export default function PDV() {
       );
 
       const novasComandas = comandaMesa.filter((c) => c.orderId !== orderId);
-      setComandas((prev) => ({
-        ...prev,
-        [mesaAtual]: novasComandas,
-      }));
+      setComandas((prev) => ({ ...prev, [mesaAtual]: novasComandas }));
 
       alert(
-        `Comanda de ${comandaAtual.customerName} finalizada! Total: R$ ${totalComanda.toFixed(2)}`,
+        `Comanda de ${comandaAtual.customerName} finalizada!\nTotal: R$ ${totalComanda.toFixed(2)}\nPagamento: ${formaPagamento}`,
       );
 
       if (comandaSelecionada === orderId) {
@@ -507,13 +525,17 @@ export default function PDV() {
         );
       }
 
+      if (isBalcao && isMobile) {
+        setActivePanel("mesas");
+      }
+
       setModalFinalizar(false);
+      setFormaPagamento("");
     } catch (error) {
       console.error(error);
       alert("Erro ao finalizar comanda");
     }
   };
-
   const handleAddItemClick = (produto) => {
     if (!mesaAtual) {
       alert("Selecione uma mesa primeiro");
@@ -544,6 +566,40 @@ export default function PDV() {
       left: rect.left + window.scrollX - 140,
     });
     setMenuMesa(menuMesa === mesa ? null : mesa);
+  };
+
+  const abrirVendaRapida = async () => {
+    // Encontrar mesa balcão (número 0)
+    const mesaBalcao = mesas.find((m) => m.number === 0);
+
+    if (!mesaBalcao) {
+      alert("Mesa de balcão não encontrada. Contate o administrador.");
+      return;
+    }
+
+    const mesaNome = `mesa-${mesaBalcao.number}`;
+
+    // Verificar se já tem comanda aberta no balcão
+    const comandasBalcao = comandas[mesaNome] || [];
+    const comandaAberta = comandasBalcao.find((c) => {
+      const order = orders.find((o) => o.id === c.orderId);
+      return order && order.status === "aberto";
+    });
+
+    if (comandaAberta) {
+      // Reutilizar comanda existente
+      setMesaAtual(mesaNome);
+      setComandaSelecionada(comandaAberta.orderId);
+      alert("Comanda de balcão já está aberta! Adicione os itens.");
+    } else {
+      // Abrir nova comanda
+      await abrirComanda(mesaNome, "Balcão");
+    }
+
+    // Ir para o cardápio (mobile)
+    if (isMobile) {
+      setActivePanel("cardapio");
+    }
   };
 
   const comandaSelecionadaItems = comandaSelecionada
@@ -768,11 +824,18 @@ export default function PDV() {
     );
   };
 
-  // Modal de finalizar comanda
+  // Modal de finalizar comanda com forma de pagamento
   const ModalFinalizarComanda = ({ onClose }) => {
     const comandaAtual = comandasDaMesaAtual.find(
       (c) => c.orderId === comandaSelecionada,
     );
+
+    const opcoesPagamento = [
+      { value: "dinheiro", label: "💰 Dinheiro", icon: "💵" },
+      { value: "pix", label: "📱 PIX", icon: "📱" },
+      { value: "credito", label: "💳 Cartão de Crédito", icon: "💳" },
+      { value: "debito", label: "💳 Cartão de Débito", icon: "💳" },
+    ];
 
     return (
       <div
@@ -796,8 +859,10 @@ export default function PDV() {
             borderRadius: 12,
             padding: 24,
             width: "90%",
-            maxWidth: 400,
+            maxWidth: 450,
             boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+            maxHeight: "90vh",
+            overflowY: "auto",
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -809,41 +874,96 @@ export default function PDV() {
             </p>
           </div>
 
-          <div style={{ marginBottom: 24 }}>
+          {/* Resumo da comanda */}
+          <div
+            style={{
+              background: "#f3f4f6",
+              padding: 16,
+              borderRadius: 8,
+              marginBottom: 20,
+            }}
+          >
             <div
               style={{
-                background: "#f3f4f6",
-                padding: 16,
-                borderRadius: 8,
-                marginBottom: 12,
+                display: "flex",
+                justifyContent: "space-between",
+                marginBottom: 8,
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 8,
-                }}
-              >
-                <span style={{ fontSize: 14 }}>Total de itens:</span>
-                <span style={{ fontWeight: "bold" }}>
-                  {comandaSelecionadaItems.length}
-                </span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 14 }}>Valor total:</span>
-                <span
-                  style={{ fontSize: 18, fontWeight: "bold", color: "#059669" }}
-                >
-                  R$ {total.toFixed(2)}
-                </span>
-              </div>
+              <span style={{ fontSize: 14 }}>Total de itens:</span>
+              <span style={{ fontWeight: "bold" }}>
+                {comandaSelecionadaItems.length}
+              </span>
             </div>
-            <p style={{ fontSize: 14, color: "#374151", textAlign: "center" }}>
-              Confirmar o fechamento da comanda?
-            </p>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 14 }}>Valor total:</span>
+              <span
+                style={{ fontSize: 18, fontWeight: "bold", color: "#059669" }}
+              >
+                R$ {total.toFixed(2)}
+              </span>
+            </div>
           </div>
 
+          {/* Forma de pagamento */}
+          <div style={{ marginBottom: 20 }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 8,
+                fontSize: 14,
+                fontWeight: 500,
+                color: "#374151",
+              }}
+            >
+              Forma de pagamento:
+            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {opcoesPagamento.map((opcao) => (
+                <button
+                  key={opcao.value}
+                  onClick={() => setFormaPagamento(opcao.value)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    width: "100%",
+                    padding: "12px 16px",
+                    borderRadius: 8,
+                    border:
+                      formaPagamento === opcao.value
+                        ? "2px solid #10b981"
+                        : "1px solid #e5e7eb",
+                    background:
+                      formaPagamento === opcao.value ? "#f0fdf4" : "#fff",
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (formaPagamento !== opcao.value) {
+                      e.currentTarget.style.background = "#f9fafb";
+                      e.currentTarget.style.borderColor = "#10b981";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (formaPagamento !== opcao.value) {
+                      e.currentTarget.style.background = "#fff";
+                      e.currentTarget.style.borderColor = "#e5e7eb";
+                    }
+                  }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>
+                    {opcao.label}
+                  </span>
+                  {formaPagamento === opcao.value && (
+                    <span style={{ color: "#10b981", fontSize: 18 }}>✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ações */}
           <div style={{ display: "flex", gap: 12 }}>
             <button
               onClick={onClose}
@@ -861,16 +981,20 @@ export default function PDV() {
               Cancelar
             </button>
             <button
-              onClick={() => finalizarComanda(comandaSelecionada)}
+              onClick={() =>
+                finalizarComanda(comandaSelecionada, formaPagamento)
+              }
+              disabled={!formaPagamento}
               style={{
                 flex: 1,
                 padding: "10px",
                 borderRadius: 8,
                 border: "none",
-                background: "#ef4444",
+                background: formaPagamento ? "#10b981" : "#9ca3af",
                 color: "#fff",
                 fontWeight: "bold",
-                cursor: "pointer",
+                cursor: formaPagamento ? "pointer" : "not-allowed",
+                opacity: formaPagamento ? 1 : 0.6,
               }}
             >
               Finalizar
@@ -1225,6 +1349,7 @@ export default function PDV() {
               const ocupada = comandasDaMesa.length > 0;
               const isActive = mesaAtual === mesa;
               const numeroMesa = mesa.replace("mesa-", "");
+              const isBalcao = numeroMesa === "0" || numeroMesa === "00";
 
               return (
                 <div
@@ -1239,11 +1364,13 @@ export default function PDV() {
                   }}
                   style={{
                     position: "relative",
-                    background: isActive
-                      ? "#374151"
-                      : ocupada
-                        ? "#1e3a2f"
-                        : "#111827",
+                    background: isBalcao
+                      ? "#10b981"
+                      : isActive
+                        ? "#374151"
+                        : ocupada
+                          ? "#1e3a2f"
+                          : "#111827",
                     borderRadius: 6,
                     padding: "10px 4px",
                     cursor: "pointer",
@@ -1273,40 +1400,54 @@ export default function PDV() {
                       fontFamily: "monospace",
                     }}
                   >
-                    {numeroMesa.padStart(2, "0")}
+                    {isBalcao ? "" : numeroMesa.padStart(2, "0")}
                   </div>
-                  {ocupada && (
+                  {isBalcao && (
+                    <div
+                      style={{
+                        fontSize: 9,
+                        color: "#fff",
+                        marginTop: 2,
+                        opacity: 0.9,
+                      }}
+                    >
+                      Balcão
+                    </div>
+                  )}
+                  {!isBalcao && ocupada && (
                     <div
                       style={{ fontSize: 9, color: "#9ca3af", marginTop: 2 }}
                     >
                       {comandasDaMesa.length} comanda(s)
                     </div>
                   )}
-                  <div
-                    style={{
-                      position: "absolute",
-                      bottom: 2,
-                      right: 4,
-                      background: "rgba(0,0,0,0.6)",
-                      borderRadius: 3,
-                      width: 16,
-                      height: 16,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: "pointer",
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleMenuClick(e, mesa);
-                    }}
-                  >
-                    <span
-                      style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}
+                  {!isBalcao && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 2,
+                        right: 4,
+                        background: "rgba(0,0,0,0.6)",
+                        borderRadius: 3,
+                        width: 16,
+                        height: 16,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMenuClick(e, mesa);
+                      }}
                     >
-                      ⋮
-                    </span>
-                  </div>
+                      <span
+                        style={{ color: "#fff", fontSize: 10, lineHeight: 1 }}
+                      >
+                        ⋮
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}
