@@ -474,12 +474,10 @@ export default function PDV() {
       0,
     );
 
-    if (comandaAtual.items.length === 0) {
-      alert("Adicione itens à comanda");
-      return;
-    }
+    const temItens = comandaAtual.items.length > 0;
 
-    if (!formaPagamento) {
+    // ✅ Só valida forma de pagamento se tiver itens
+    if (temItens && !formaPagamento) {
       alert("Selecione a forma de pagamento");
       return;
     }
@@ -496,7 +494,7 @@ export default function PDV() {
             Accept: "application/json",
           },
           body: JSON.stringify({
-            payment_method: formaPagamento,
+            payment_method: formaPagamento || null, // Pode ser null se não tiver itens
             total: totalComanda,
           }),
         },
@@ -513,11 +511,16 @@ export default function PDV() {
       );
 
       const novasComandas = comandaMesa.filter((c) => c.orderId !== orderId);
-      setComandas((prev) => ({ ...prev, [mesaAtual]: novasComandas }));
+      setComandas((prev) => ({
+        ...prev,
+        [mesaAtual]: novasComandas,
+      }));
 
-      alert(
-        `Comanda de ${comandaAtual.customerName} finalizada!\nTotal: R$ ${totalComanda.toFixed(2)}\nPagamento: ${formaPagamento}`,
-      );
+      const mensagem = !temItens
+        ? `Comanda de ${comandaAtual.customerName} cancelada (sem consumo)!`
+        : `Comanda de ${comandaAtual.customerName} finalizada!\nTotal: R$ ${totalComanda.toFixed(2)}\nPagamento: ${formaPagamento}`;
+
+      alert(mensagem);
 
       if (comandaSelecionada === orderId) {
         setComandaSelecionada(
@@ -536,6 +539,7 @@ export default function PDV() {
       alert("Erro ao finalizar comanda");
     }
   };
+
   const handleAddItemClick = (produto) => {
     if (!mesaAtual) {
       alert("Selecione uma mesa primeiro");
@@ -882,11 +886,18 @@ export default function PDV() {
       (c) => c.orderId === comandaSelecionada,
     );
 
+    const totalComanda = comandaSelecionadaItems.reduce(
+      (sum, i) => sum + i.price * i.qtd,
+      0,
+    );
+
+    const temItens = comandaSelecionadaItems.length > 0;
+
     const opcoesPagamento = [
-      { value: "dinheiro", label: "💰 Dinheiro", icon: "💵" },
-      { value: "pix", label: "📱 PIX", icon: "📱" },
-      { value: "credito", label: "💳 Cartão de Crédito", icon: "💳" },
-      { value: "debito", label: "💳 Cartão de Débito", icon: "💳" },
+      { value: "dinheiro", label: "Dinheiro", icon: "💰" },
+      { value: "pix", label: "PIX", icon: "📱" },
+      { value: "credito", label: "Cartão de Crédito", icon: "💳" },
+      { value: "debito", label: "Cartão de Débito", icon: "💳" },
     ];
 
     return (
@@ -919,7 +930,9 @@ export default function PDV() {
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <h2 style={{ margin: 0, fontSize: 24 }}>Finalizar Comanda</h2>
+            <h2 style={{ margin: 0, fontSize: 24 }}>
+              {temItens ? "Finalizar Comanda" : "Cancelar Comanda"}
+            </h2>
             <p style={{ margin: "8px 0 0", color: "#6b7280" }}>
               Mesa {mesaAtual?.replace("mesa-", "")} -{" "}
               {comandaAtual?.customerName}
@@ -947,73 +960,84 @@ export default function PDV() {
                 {comandaSelecionadaItems.length}
               </span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 14 }}>Valor total:</span>
-              <span
-                style={{ fontSize: 18, fontWeight: "bold", color: "#059669" }}
-              >
-                R$ {total.toFixed(2)}
-              </span>
-            </div>
+            {temItens && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 14 }}>Valor total:</span>
+                <span
+                  style={{ fontSize: 18, fontWeight: "bold", color: "#059669" }}
+                >
+                  R$ {totalComanda.toFixed(2)}
+                </span>
+              </div>
+            )}
+            {!temItens && (
+              <div style={{ textAlign: "center", marginTop: 8 }}>
+                <span style={{ fontSize: 13, color: "#6b7280" }}>
+                  ⚠️ Esta comanda não possui itens. Ela será apenas cancelada.
+                </span>
+              </div>
+            )}
           </div>
 
-          {/* Forma de pagamento */}
-          <div style={{ marginBottom: 20 }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: 8,
-                fontSize: 14,
-                fontWeight: 500,
-                color: "#374151",
-              }}
-            >
-              Forma de pagamento:
-            </label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {opcoesPagamento.map((opcao) => (
-                <button
-                  key={opcao.value}
-                  onClick={() => setFormaPagamento(opcao.value)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    width: "100%",
-                    padding: "12px 16px",
-                    borderRadius: 8,
-                    border:
-                      formaPagamento === opcao.value
-                        ? "2px solid #10b981"
-                        : "1px solid #e5e7eb",
-                    background:
-                      formaPagamento === opcao.value ? "#f0fdf4" : "#fff",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (formaPagamento !== opcao.value) {
-                      e.currentTarget.style.background = "#f9fafb";
-                      e.currentTarget.style.borderColor = "#10b981";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (formaPagamento !== opcao.value) {
-                      e.currentTarget.style.background = "#fff";
-                      e.currentTarget.style.borderColor = "#e5e7eb";
-                    }
-                  }}
-                >
-                  <span style={{ fontSize: 14, fontWeight: 500 }}>
-                    {opcao.label}
-                  </span>
-                  {formaPagamento === opcao.value && (
-                    <span style={{ color: "#10b981", fontSize: 18 }}>✓</span>
-                  )}
-                </button>
-              ))}
+          {/* Forma de pagamento - SÓ MOSTRA SE TIVER ITENS */}
+          {temItens && (
+            <div style={{ marginBottom: 20 }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 8,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "#374151",
+                }}
+              >
+                Forma de pagamento:
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {opcoesPagamento.map((opcao) => (
+                  <button
+                    key={opcao.value}
+                    onClick={() => setFormaPagamento(opcao.value)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      padding: "12px 16px",
+                      borderRadius: 8,
+                      border:
+                        formaPagamento === opcao.value
+                          ? "2px solid #10b981"
+                          : "1px solid #e5e7eb",
+                      background:
+                        formaPagamento === opcao.value ? "#f0fdf4" : "#fff",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (formaPagamento !== opcao.value) {
+                        e.currentTarget.style.background = "#f9fafb";
+                        e.currentTarget.style.borderColor = "#10b981";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (formaPagamento !== opcao.value) {
+                        e.currentTarget.style.background = "#fff";
+                        e.currentTarget.style.borderColor = "#e5e7eb";
+                      }
+                    }}
+                  >
+                    <span style={{ fontSize: 14, fontWeight: 500 }}>
+                      {opcao.label}
+                    </span>
+                    {formaPagamento === opcao.value && (
+                      <span style={{ color: "#10b981", fontSize: 18 }}>✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Ações */}
           <div style={{ display: "flex", gap: 12 }}>
@@ -1036,20 +1060,20 @@ export default function PDV() {
               onClick={() =>
                 finalizarComanda(comandaSelecionada, formaPagamento)
               }
-              disabled={!formaPagamento}
+              disabled={temItens && !formaPagamento}
               style={{
                 flex: 1,
                 padding: "10px",
                 borderRadius: 8,
                 border: "none",
-                background: formaPagamento ? "#10b981" : "#9ca3af",
+                background: temItens && !formaPagamento ? "#9ca3af" : "#10b981",
                 color: "#fff",
                 fontWeight: "bold",
-                cursor: formaPagamento ? "pointer" : "not-allowed",
-                opacity: formaPagamento ? 1 : 0.6,
+                cursor: temItens && !formaPagamento ? "not-allowed" : "pointer",
+                opacity: temItens && !formaPagamento ? 0.6 : 1,
               }}
             >
-              Finalizar
+              {temItens ? "Finalizar" : "Cancelar Comanda"}
             </button>
           </div>
         </div>
