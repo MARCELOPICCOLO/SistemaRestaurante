@@ -23,79 +23,55 @@ class TableController extends Controller
     // ➕ CRIAR MESA
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'restaurant_id' => 'required|exists:restaurants,id',
-            'number' => 'required|integer|min:1'
-        ]);
-
-        // ✅ VERIFICAR SE JÁ EXISTE MESA COM ESTE NÚMERO
-        $existingTable = Table::where('restaurant_id', $data['restaurant_id'])
-            ->where('number', $data['number'])
-            ->first();
-
-        if ($existingTable) {
-            return response()->json([
-                'message' => 'Já existe uma mesa com o número ' . $data['number'] . ' neste restaurante'
-            ], 409); // 409 Conflict
-        }
-
-        $table = Table::create($data);
-
-        return response()->json($table, 201);
+        // ... seu código
     }
 
-    // 🔍 MOSTRAR MESA
-    public function show($id)
+    // 🔍 MOSTRAR MESA (parâmetro $table)
+    public function show($table)
     {
-        $table = Table::findOrFail($id);
+        $table = Table::findOrFail($table);
         return response()->json($table);
     }
 
-    // ✏️ ATUALIZAR MESA
-    public function update(Request $request, $id)
+    // ✏️ ATUALIZAR MESA (parâmetro $table)
+    public function update(Request $request, $table)
     {
-        $table = Table::findOrFail($id);
+        $table = Table::findOrFail($table);
+        // ... seu código
+    }
 
-        $data = $request->validate([
-            'number' => 'sometimes|integer|min:1'
-        ]);
+    // ❌ DELETAR MESA (parâmetro $table)
+    public function destroy($table)
+    {
+        try {
+            $table = Table::findOrFail($table);
 
-        // ✅ VERIFICAR SE OUTRA MESA JÁ TEM ESTE NÚMERO
-        if (isset($data['number'])) {
-            $existingTable = Table::where('restaurant_id', $table->restaurant_id)
-                ->where('number', $data['number'])
-                ->where('id', '!=', $id)
-                ->first();
-
-            if ($existingTable) {
+            // Impedir exclusão da mesa balcão
+            if ($table->number === 0) {
                 return response()->json([
-                    'message' => 'Já existe uma mesa com o número ' . $data['number'] . ' neste restaurante'
+                    'message' => 'A mesa do balcão não pode ser excluída'
                 ], 409);
             }
-        }
 
-        $table->update($data);
-        return response()->json($table);
-    }
+            // Verificar se tem comandas abertas
+            $hasOpenOrders = $table->orders()->where('status', 'aberto')->exists();
 
-    // ❌ DELETAR MESA
-    public function destroy($id)
-    {
-        $table = Table::findOrFail($id);
+            if ($hasOpenOrders) {
+                return response()->json([
+                    'message' => 'Não é possível excluir a mesa pois ela possui comandas abertas'
+                ], 409);
+            }
 
-        // Verificar se a mesa tem comandas abertas
-        $hasOpenOrders = $table->orders()->where('status', 'aberto')->exists();
+            $table->delete();
 
-        if ($hasOpenOrders) {
             return response()->json([
-                'message' => 'Não é possível excluir a mesa pois ela possui comandas abertas'
-            ], 409);
+                'message' => 'Mesa deletada com sucesso'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao deletar mesa',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $table->delete();
-
-        return response()->json([
-            'message' => 'Mesa deletada com sucesso'
-        ]);
     }
 }

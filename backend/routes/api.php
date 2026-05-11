@@ -6,6 +6,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\TableController;
+use App\Http\Controllers\ExpenseController;
 
 // ========== PRODUTOS ==========
 Route::apiResource('products', ProductController::class);
@@ -15,11 +16,20 @@ Route::get('/products/code/{code}', [ProductController::class, 'findByCode']);
 Route::apiResource('categories', CategoryController::class);
 
 // ========== MESAS ==========
+// API Resource já cria: index, store, show, update, destroy
 Route::apiResource('tables', TableController::class);
+// Rota adicional para listar comandas de uma mesa específica
 Route::get('/tables/{tableId}/orders', [OrderController::class, 'getByTable']);
 
 // ========== COMANDAS (ORDERS) ==========
 Route::prefix('orders')->group(function () {
+    // ✅ Adicione explicitamente POST
+    Route::match(['GET', 'POST'], '/summary', [OrderController::class, 'salesSummary']);
+
+    // OU apenas POST
+    Route::post('/summary', [OrderController::class, 'salesSummary']);
+
+    // Depois as outras rotas
     Route::get('/', [OrderController::class, 'index']);
     Route::get('/{id}', [OrderController::class, 'show']);
     Route::post('/', [OrderController::class, 'store']);
@@ -29,8 +39,19 @@ Route::prefix('orders')->group(function () {
     Route::get('/{id}/items', [OrderController::class, 'getItems']);
 });
 
-// ========== ORDER ITEMS (CRUCIAL PARA SEU ERRO 404) ==========
+// ========== ORDER ITEMS ==========
 Route::prefix('order-items')->group(function () {
     Route::put('/{id}', [OrderController::class, 'updateItem']);
     Route::delete('/{id}', [OrderController::class, 'removeItem']);
+});
+
+// ========== GASTOS (EXPENSES) ==========
+Route::prefix('expenses')->group(function () {
+    Route::get('/', [ExpenseController::class, 'index']);           // Listar gastos
+    Route::get('/summary', [ExpenseController::class, 'summary']);  // Resumo do dia
+    Route::get('/monthly-summary', [ExpenseController::class, 'monthlySummary']); // Resumo do mês
+    Route::post('/', [ExpenseController::class, 'store']);          // Criar gasto
+    Route::get('/{id}', [ExpenseController::class, 'show']);        // Mostrar gasto
+    Route::put('/{id}', [ExpenseController::class, 'update']);      // Atualizar gasto
+    Route::delete('/{id}', [ExpenseController::class, 'destroy']);  // Deletar gasto
 });

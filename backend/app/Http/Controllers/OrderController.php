@@ -196,6 +196,7 @@ class OrderController extends Controller
     }
 
     // 💰 FECHAR COMANDA (COM FORMA DE PAGAMENTO)
+
     public function close(Request $request, $id)
     {
         try {
@@ -206,21 +207,14 @@ class OrderController extends Controller
             }
 
             $data = $request->validate([
-                'payment_method' => 'required|string|in:dinheiro,pix,credito,debito',
+                'payment_method' => 'nullable|string|in:dinheiro,pix,credito,debito', // nullable
                 'total' => 'nullable|numeric|min:0'
-            ]);
-
-            // LOG PARA DEBUG
-            \Log::info('Finalizando comanda:', [
-                'order_id' => $id,
-                'payment_method' => $data['payment_method'],
-                'total' => $data['total'] ?? $order->total
             ]);
 
             $order->update([
                 'status' => 'fechado',
                 'closed_at' => now(),
-                'payment_method' => $data['payment_method'], // ← VERIFIQUE ESTA LINHA
+                'payment_method' => $data['payment_method'] ?? null,
                 'total' => $data['total'] ?? $order->total
             ]);
 
@@ -229,7 +223,6 @@ class OrderController extends Controller
                 'order' => $order
             ]);
         } catch (\Exception $e) {
-            \Log::error('Erro ao finalizar comanda: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Erro ao finalizar comanda',
                 'error' => $e->getMessage()
@@ -281,5 +274,38 @@ class OrderController extends Controller
             ->value('total') ?? 0;
 
         $order->update(['total' => $total]);
+    }
+
+    // app/Http/Controllers/OrderController.php
+
+    public function salesSummary(Request $request)
+    {
+        try {
+            $request->validate([
+                'restaurant_id' => 'required|exists:restaurants,id',
+                'date' => 'required|date',
+            ]);
+
+            $totalSales = Order::where('restaurant_id', $request->restaurant_id)
+                ->where('status', 'fechado')
+                ->whereDate('closed_at', $request->date)
+                ->sum('total');
+
+            $totalOrders = Order::where('restaurant_id', $request->restaurant_id)
+                ->where('status', 'fechado')
+                ->whereDate('closed_at', $request->date)
+                ->count();
+
+            return response()->json([
+                'date' => $request->date,
+                'total_sales' => (float) $totalSales,
+                'total_orders' => $totalOrders,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro ao buscar resumo de vendas',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }

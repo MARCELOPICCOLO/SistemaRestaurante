@@ -9,7 +9,8 @@ class Table extends Model
 {
     protected $fillable = [
         'restaurant_id',
-        'number'
+        'number',
+        'qr_code_hash'  // ← ADICIONE ESTA LINHA
     ];
 
     public function restaurant()
