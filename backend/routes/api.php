@@ -7,6 +7,7 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\TableController;
 use App\Http\Controllers\ExpenseController;
+use App\Http\Controllers\ExpenseCategoryController;
 
 // ========== PRODUTOS ==========
 Route::apiResource('products', ProductController::class);
@@ -54,4 +55,13 @@ Route::prefix('expenses')->group(function () {
     Route::get('/{id}', [ExpenseController::class, 'show']);        // Mostrar gasto
     Route::put('/{id}', [ExpenseController::class, 'update']);      // Atualizar gasto
     Route::delete('/{id}', [ExpenseController::class, 'destroy']);  // Deletar gasto
+});
+
+
+Route::prefix('expense-categories')->group(function () {
+    Route::get('/', [ExpenseCategoryController::class, 'index']);
+    Route::post('/', [ExpenseCategoryController::class, 'store']);
+    Route::get('/{id}', [ExpenseCategoryController::class, 'show']);
+    Route::put('/{id}', [ExpenseCategoryController::class, 'update']);
+    Route::delete('/{id}', [ExpenseCategoryController::class, 'destroy']);
 });
