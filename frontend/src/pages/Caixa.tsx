@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
-interface Expense {
+interface Transaction {
   id: number;
   description: string;
   amount: number;
-  expense_date: string;
+  date: string;
   category_id: number;
+  type: "entrada" | "saida";
   category?: ExpenseCategory;
   notes: string | null;
+  source?: "pdv" | "manual";
 }
 
 interface ExpenseCategory {
@@ -18,6 +20,16 @@ interface ExpenseCategory {
   is_active: boolean;
 }
 
+interface Order {
+  id: number;
+  customer_name: string;
+  total: number;
+  closed_at: string;
+  payment_method: string;
+  status: string;
+  table_id: number;
+}
+
 export default function Caixa() {
   const hoje = new Date().toISOString().split("T")[0];
   const anoAtual = new Date().getFullYear();
@@ -25,16 +37,18 @@ export default function Caixa() {
 
   const [anoSelecionado, setAnoSelecionado] = useState(anoAtual);
   const [mesSelecionado, setMesSelecionado] = useState(mesAtual);
-  const [gastos, setGastos] = useState<Expense[]>([]);
+  const [transacoes, setTransacoes] = useState<Transaction[]>([]);
   const [categorias, setCategorias] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [diasExpandidos, setDiasExpandidos] = useState<{
     [key: string]: boolean;
   }>({});
+  const [showEntradas, setShowEntradas] = useState(true);
+  const [showSaidas, setShowSaidas] = useState(true);
 
-  // Estados para modais
   const [showModalGerenciar, setShowModalGerenciar] = useState(false);
   const [showModalCategoria, setShowModalCategoria] = useState(false);
+  const [showModalSaida, setShowModalSaida] = useState(false);
   const [editandoCategoria, setEditandoCategoria] =
     useState<ExpenseCategory | null>(null);
 
@@ -44,7 +58,7 @@ export default function Caixa() {
     color: "#6b7280",
   });
 
-  const [novo, setNovo] = useState({
+  const [novaSaida, setNovaSaida] = useState({
     descricao: "",
     valor: 0,
     category_id: 0,
@@ -53,7 +67,8 @@ export default function Caixa() {
 
   const [filtroCategoria, setFiltroCategoria] = useState<number | null>(null);
 
-  // Cores predefinidas
+  const isFirstRender = useRef(true);
+
   const cores = [
     "#dc2626",
     "#f59e0b",
@@ -72,31 +87,6 @@ export default function Caixa() {
     "#f43f5e",
   ];
 
-  // Ícones comuns
-  const icones = [
-    "📌",
-    "🥩",
-    "🛒",
-    "💧",
-    "⚡",
-    "🔥",
-    "🍺",
-    "📦",
-    "⛽",
-    "🥬",
-    "🍞",
-    "🧀",
-    "🥛",
-    "🍗",
-    "🐟",
-    "🍎",
-    "🚗",
-    "💊",
-    "🧹",
-    "📱",
-  ];
-
-  // Buscar categorias da API
   const fetchCategorias = async () => {
     try {
       const response = await fetch(
@@ -106,17 +96,57 @@ export default function Caixa() {
       const data = await response.json();
       setCategorias(data);
 
-      if (data.length > 0 && novo.category_id === 0) {
-        setNovo((prev) => ({ ...prev, category_id: data[0].id }));
+      if (data.length > 0 && novaSaida.category_id === 0) {
+        setNovaSaida((prev) => ({ ...prev, category_id: data[0].id }));
       }
     } catch (error) {
       console.error("Erro ao buscar categorias:", error);
     }
   };
 
-  // Buscar gastos da API
-  const fetchGastos = async () => {
-    setLoading(true);
+  const fetchEntradas = useCallback(async () => {
+    try {
+      const startDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-01`;
+      const lastDay = new Date(anoSelecionado, mesSelecionado, 0).getDate();
+      const endDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-${lastDay}`;
+
+      const response = await fetch(
+        `http://localhost:8000/api/orders?restaurant_id=1`,
+      );
+      if (!response.ok) throw new Error("Erro ao buscar vendas");
+
+      const orders: Order[] = await response.json();
+
+      const vendasNoPeriodo = orders.filter((order) => {
+        if (order.status !== "fechado") return false;
+        const orderDate = order.closed_at
+          ? new Date(order.closed_at).toISOString().split("T")[0]
+          : null;
+        return orderDate >= startDate && orderDate <= endDate;
+      });
+
+      const entradas: Transaction[] = vendasNoPeriodo.map((order) => ({
+        id: order.id,
+        description: `Venda - ${order.customer_name || `Mesa ${order.table_id}`}`,
+        amount: Number(order.total) || 0,
+        date: order.closed_at
+          ? order.closed_at.split("T")[0]
+          : new Date().toISOString().split("T")[0],
+        category_id: 0,
+        type: "entrada",
+        category: undefined,
+        notes: `Pagamento: ${order.payment_method}`,
+        source: "pdv",
+      }));
+
+      return entradas;
+    } catch (error) {
+      console.error("Erro ao buscar vendas:", error);
+      return [];
+    }
+  }, [anoSelecionado, mesSelecionado]);
+
+  const fetchSaidas = useCallback(async () => {
     try {
       const startDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-01`;
       const lastDay = new Date(anoSelecionado, mesSelecionado, 0).getDate();
@@ -125,59 +155,77 @@ export default function Caixa() {
       const url = `http://localhost:8000/api/expenses?restaurant_id=1&start_date=${startDate}&end_date=${endDate}`;
       const response = await fetch(url);
 
-      if (!response.ok) throw new Error("Erro ao buscar gastos");
+      if (!response.ok) throw new Error("Erro ao buscar saídas");
 
       const data = await response.json();
 
-      const gastosFormatados = data.map((gasto: any) => {
-        const categoria = categorias.find((c) => c.id === gasto.category_id);
+      const saidas: Transaction[] = data.map((item: any) => {
+        const categoria = categorias.find((c) => c.id === item.category_id);
         return {
-          id: gasto.id,
-          description: gasto.description,
-          amount: Number(gasto.amount) || 0,
-          expense_date: gasto.expense_date,
-          category_id: gasto.category_id,
+          id: item.id,
+          description: item.description,
+          amount: Number(item.amount) || 0,
+          date: item.expense_date.split("T")[0],
+          category_id: item.category_id,
+          type: "saida",
           category: categoria,
-          notes: gasto.notes,
+          notes: item.notes,
+          source: "manual",
         };
       });
 
-      gastosFormatados.sort((a: Expense, b: Expense) =>
-        b.expense_date.localeCompare(a.expense_date),
-      );
+      return saidas;
+    } catch (error) {
+      console.error("Erro ao buscar saídas:", error);
+      return [];
+    }
+  }, [anoSelecionado, mesSelecionado, categorias]);
 
-      setGastos(gastosFormatados);
+  const fetchTransacoes = useCallback(async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const [entradas, saidas] = await Promise.all([
+        fetchEntradas(),
+        fetchSaidas(),
+      ]);
 
-      const diasUnicos = [
-        ...new Set(
-          gastosFormatados.map((g: Expense) => g.expense_date.split("T")[0]),
-        ),
-      ];
+      const todasTransacoes = [...entradas, ...saidas];
+      todasTransacoes.sort((a, b) => b.date.localeCompare(a.date));
+
+      setTransacoes(todasTransacoes);
+
+      const diasUnicos = [...new Set(todasTransacoes.map((t) => t.date))];
       const novosExpandidos: { [key: string]: boolean } = {};
       diasUnicos.forEach((data) => {
-        if (diasExpandidos[data] === undefined) {
-          novosExpandidos[data] = true;
-        }
+        novosExpandidos[data] = true;
       });
       setDiasExpandidos((prev) => ({ ...prev, ...novosExpandidos }));
     } catch (error) {
-      console.error("Erro ao buscar gastos:", error);
+      console.error("Erro ao buscar transações:", error);
+      setTransacoes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchEntradas, fetchSaidas, loading]);
 
   useEffect(() => {
     fetchCategorias();
   }, []);
 
   useEffect(() => {
-    if (categorias.length > 0) {
-      fetchGastos();
+    if (categorias.length > 0 && !isFirstRender.current) {
+      fetchTransacoes();
     }
-  }, [anoSelecionado, mesSelecionado, categorias]);
+  }, [anoSelecionado, mesSelecionado]);
 
-  // Adicionar categoria
+  useEffect(() => {
+    if (categorias.length > 0 && isFirstRender.current) {
+      fetchTransacoes();
+      isFirstRender.current = false;
+    }
+  }, [categorias]);
+
   const adicionarCategoria = async () => {
     if (!novaCategoria.name.trim()) {
       alert("Digite o nome da categoria");
@@ -214,7 +262,6 @@ export default function Caixa() {
     }
   };
 
-  // Editar categoria
   const editarCategoria = async () => {
     if (!editandoCategoria) return;
     if (!editandoCategoria.name.trim()) {
@@ -250,14 +297,15 @@ export default function Caixa() {
     }
   };
 
-  // Excluir categoria
   const excluirCategoria = async (id: number, name: string) => {
-    const temGastos = gastos.some((g) => g.category_id === id);
+    const temSaidas = transacoes.some(
+      (t) => t.type === "saida" && t.category_id === id,
+    );
 
-    if (temGastos) {
+    if (temSaidas) {
       if (
         !confirm(
-          `A categoria "${name}" possui gastos associados. Excluir mesmo assim? Os gastos ficarão sem categoria.`,
+          `A categoria "${name}" possui gastos associados. Excluir mesmo assim?`,
         )
       ) {
         return;
@@ -299,13 +347,13 @@ export default function Caixa() {
     }
   };
 
-  const adicionarGasto = async () => {
-    if (!novo.descricao || novo.valor <= 0) {
+  const adicionarSaida = async () => {
+    if (!novaSaida.descricao || novaSaida.valor <= 0) {
       alert("Preencha a descrição e o valor");
       return;
     }
 
-    if (!novo.category_id) {
+    if (!novaSaida.category_id) {
       alert("Selecione uma categoria");
       return;
     }
@@ -319,36 +367,47 @@ export default function Caixa() {
         },
         body: JSON.stringify({
           restaurant_id: 1,
-          description: novo.descricao,
-          amount: Number(novo.valor),
-          expense_date: novo.data,
-          category_id: novo.category_id,
+          description: novaSaida.descricao,
+          amount: Number(novaSaida.valor),
+          expense_date: novaSaida.data,
+          category_id: novaSaida.category_id,
+          type: "saida",
           notes: null,
         }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        alert(error.message || "Erro ao adicionar gasto");
+        alert(error.message || "Erro ao adicionar saída");
         return;
       }
 
-      setNovo({
+      setNovaSaida({
         descricao: "",
         valor: 0,
         category_id: categorias[0]?.id || 0,
         data: hoje,
       });
-      fetchGastos();
-      alert("Gasto adicionado com sucesso!");
+      setShowModalSaida(false);
+      fetchTransacoes();
+      alert("Saída adicionada com sucesso!");
     } catch (error) {
-      console.error("Erro ao adicionar gasto:", error);
+      console.error("Erro ao adicionar saída:", error);
       alert("Erro ao conectar com o servidor");
     }
   };
 
-  const removerGasto = async (id: number) => {
+  const removerTransacao = async (
+    id: number,
+    type: string,
+    source?: string,
+  ) => {
     if (!confirm("Remover esse lançamento?")) return;
+
+    if (type === "entrada" && source === "pdv") {
+      alert("Entradas do PDV não podem ser removidas aqui.");
+      return;
+    }
 
     try {
       const response = await fetch(`http://localhost:8000/api/expenses/${id}`, {
@@ -360,14 +419,14 @@ export default function Caixa() {
       });
 
       if (!response.ok) {
-        alert("Erro ao remover gasto");
+        alert("Erro ao remover");
         return;
       }
 
-      fetchGastos();
-      alert("Gasto removido com sucesso!");
+      fetchTransacoes();
+      alert("Removido com sucesso!");
     } catch (error) {
-      console.error("Erro ao remover gasto:", error);
+      console.error("Erro ao remover:", error);
       alert("Erro ao conectar com o servidor");
     }
   };
@@ -377,35 +436,80 @@ export default function Caixa() {
   };
 
   const formatCurrency = (value: any): string => {
-    const number = typeof value === "number" ? value : Number(value) || 0;
-    return `R$ ${number.toFixed(2)}`;
+    const num = typeof value === "number" ? value : Number(value) || 0;
+    return `R$ ${num.toFixed(2)}`;
   };
 
   const formatDate = (dateString: string): string => {
     if (!dateString) return "-";
-    return dateString.split("T")[0].split("-").reverse().join("/");
+    return dateString.split("-").reverse().join("/");
   };
 
-  const gastosFiltrados = filtroCategoria
-    ? gastos.filter((g) => g.category_id === filtroCategoria)
-    : gastos;
+  const totalEntradas = transacoes
+    .filter((t) => t.type === "entrada")
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-  const gastosPorData = gastosFiltrados.reduce((acc: any, gasto) => {
-    const data = gasto.expense_date.split("T")[0];
-    if (!acc[data]) acc[data] = [];
-    acc[data].push(gasto);
-    return acc;
-  }, {});
+  const totalSaidas = transacoes
+    .filter((t) => t.type === "saida")
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
 
-  const totalPorData = Object.keys(gastosPorData).reduce((acc: any, data) => {
-    acc[data] = gastosPorData[data].reduce(
-      (sum: number, g: Expense) => sum + g.amount,
-      0,
-    );
-    return acc;
-  }, {});
+  const saldoGeral = (totalEntradas || 0) - (totalSaidas || 0);
 
-  const totalGeral = gastosFiltrados.reduce((sum, g) => sum + g.amount, 0);
+  const transacoesFiltradas = transacoes.filter((t) => {
+    const matchCategoria = filtroCategoria
+      ? t.category_id === filtroCategoria
+      : true;
+    const matchTipo =
+      (t.type === "entrada" && showEntradas) ||
+      (t.type === "saida" && showSaidas);
+    return matchCategoria && matchTipo;
+  });
+
+  const transacoesPorData = transacoesFiltradas.reduce(
+    (acc: any, transacao) => {
+      const data = transacao.date;
+      if (!acc[data]) acc[data] = [];
+      acc[data].push(transacao);
+      return acc;
+    },
+    {},
+  );
+
+  const totalEntradasPorData = Object.keys(transacoesPorData).reduce(
+    (acc: any, data) => {
+      acc[data] = transacoesPorData[data]
+        .filter((t: Transaction) => t.type === "entrada")
+        .reduce(
+          (sum: number, t: Transaction) => sum + (Number(t.amount) || 0),
+          0,
+        );
+      return acc;
+    },
+    {},
+  );
+
+  const totalSaidasPorData = Object.keys(transacoesPorData).reduce(
+    (acc: any, data) => {
+      acc[data] = transacoesPorData[data]
+        .filter((t: Transaction) => t.type === "saida")
+        .reduce(
+          (sum: number, t: Transaction) => sum + (Number(t.amount) || 0),
+          0,
+        );
+      return acc;
+    },
+    {},
+  );
+
+  const saldoPorData = Object.keys(transacoesPorData).reduce(
+    (acc: any, data) => {
+      const entradas = totalEntradasPorData[data] || 0;
+      const saidas = totalSaidasPorData[data] || 0;
+      acc[data] = entradas - saidas;
+      return acc;
+    },
+    {},
+  );
 
   const anos = Array.from({ length: 5 }, (_, i) => anoAtual - i);
   const meses = [
@@ -423,8 +527,7 @@ export default function Caixa() {
     { value: 12, label: "Dezembro" },
   ];
 
-  // Modal de adicionar categoria
-  const ModalAdicionarCategoria = () => (
+  const ModalAdicionarSaida = () => (
     <div
       style={{
         position: "fixed",
@@ -438,7 +541,7 @@ export default function Caixa() {
         justifyContent: "center",
         zIndex: 1001,
       }}
-      onClick={() => setShowModalCategoria(false)}
+      onClick={() => setShowModalSaida(false)}
     >
       <div
         style={{
@@ -451,8 +554,200 @@ export default function Caixa() {
         onClick={(e) => e.stopPropagation()}
       >
         <h2 style={{ margin: "0 0 20px 0", fontSize: 20 }}>
-          ➕ Nova Categoria
+          Nova Saída (Gasto)
         </h2>
+
+        <div style={{ marginBottom: 16 }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Data:
+          </label>
+          <input
+            type="date"
+            value={novaSaida.data}
+            onChange={(e) =>
+              setNovaSaida({ ...novaSaida, data: e.target.value })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Descrição:
+          </label>
+          <input
+            type="text"
+            placeholder="Ex: Compra de insumos..."
+            value={novaSaida.descricao}
+            onChange={(e) =>
+              setNovaSaida({ ...novaSaida, descricao: e.target.value })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+            autoFocus
+          />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Categoria:
+          </label>
+          <select
+            value={novaSaida.category_id}
+            onChange={(e) =>
+              setNovaSaida({
+                ...novaSaida,
+                category_id: Number(e.target.value),
+              })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+          >
+            <option value={0}>Selecione uma categoria</option>
+            {categorias.map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Valor (R$):
+          </label>
+          <input
+            type="text"
+            placeholder="0,00"
+            value={
+              novaSaida.valor === 0
+                ? ""
+                : novaSaida.valor.toLocaleString("pt-BR", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })
+            }
+            onChange={(e) => {
+              let value = e.target.value.replace(/\D/g, "");
+              const cents = parseInt(value, 10);
+              if (isNaN(cents)) setNovaSaida({ ...novaSaida, valor: 0 });
+              else setNovaSaida({ ...novaSaida, valor: cents / 100 });
+            }}
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            onClick={() => setShowModalSaida(false)}
+            style={{
+              flex: 1,
+              padding: "10px",
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={adicionarSaida}
+            style={{
+              flex: 1,
+              padding: "10px",
+              borderRadius: 8,
+              border: "none",
+              background: "#dc2626",
+              color: "#fff",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            Adicionar Saída
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ModalAdicionarCategoria = () => (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1002,
+      }}
+      onClick={() => setShowModalCategoria(false)}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          padding: 24,
+          width: "90%",
+          maxWidth: 450,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: "0 0 20px 0", fontSize: 20 }}>Nova Categoria</h2>
 
         <div style={{ marginBottom: 16 }}>
           <label
@@ -492,66 +787,6 @@ export default function Caixa() {
               fontWeight: 500,
             }}
           >
-            Ícone:
-          </label>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
-              marginBottom: 8,
-            }}
-          >
-            {icones.map((icone) => (
-              <button
-                key={icone}
-                onClick={() =>
-                  setNovaCategoria({ ...novaCategoria, icon: icone })
-                }
-                style={{
-                  width: 40,
-                  height: 40,
-                  fontSize: 24,
-                  background:
-                    novaCategoria.icon === icone ? "#10b981" : "#f3f4f6",
-                  border:
-                    novaCategoria.icon === icone
-                      ? "2px solid #10b981"
-                      : "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                }}
-              >
-                {icone}
-              </button>
-            ))}
-          </div>
-          <input
-            type="text"
-            placeholder="Ou digite um ícone (ex: 🚗)"
-            value={novaCategoria.icon}
-            onChange={(e) =>
-              setNovaCategoria({ ...novaCategoria, icon: e.target.value })
-            }
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
             Cor:
           </label>
           <div
@@ -574,12 +809,10 @@ export default function Caixa() {
                   background: cor,
                   border:
                     novaCategoria.color === cor
-                      ? "3px solid #fff"
+                      ? "2px solid #10b981"
                       : "1px solid #e5e7eb",
                   borderRadius: 8,
                   cursor: "pointer",
-                  boxShadow:
-                    novaCategoria.color === cor ? "0 0 0 2px #10b981" : "none",
                 }}
               />
             ))}
@@ -634,7 +867,6 @@ export default function Caixa() {
     </div>
   );
 
-  // Modal de gerenciar categorias
   const ModalGerenciarCategorias = () => (
     <div
       style={{
@@ -674,7 +906,7 @@ export default function Caixa() {
             marginBottom: 20,
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 20 }}>📋 Gerenciar Categorias</h2>
+          <h2 style={{ margin: 0, fontSize: 20 }}>Gerenciar Categorias</h2>
           <button
             onClick={() => setShowModalCategoria(true)}
             style={{
@@ -733,23 +965,6 @@ export default function Caixa() {
                     autoFocus
                   />
                   <input
-                    type="text"
-                    value={editandoCategoria.icon}
-                    onChange={(e) =>
-                      setEditandoCategoria({
-                        ...editandoCategoria,
-                        icon: e.target.value,
-                      })
-                    }
-                    style={{
-                      width: 60,
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid #e5e7eb",
-                      textAlign: "center",
-                    }}
-                  />
-                  <input
                     type="color"
                     value={editandoCategoria.color}
                     onChange={(e) =>
@@ -798,10 +1013,6 @@ export default function Caixa() {
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 12 }}
                   >
-                    <span style={{ fontSize: 24 }}>{cat.icon}</span>
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>
-                      {cat.name}
-                    </span>
                     <span
                       style={{
                         width: 24,
@@ -811,7 +1022,12 @@ export default function Caixa() {
                         border: "1px solid #e5e7eb",
                       }}
                     />
-                    {gastos.some((g) => g.category_id === cat.id) && (
+                    <span style={{ fontSize: 14, fontWeight: 500 }}>
+                      {cat.name}
+                    </span>
+                    {transacoes.some(
+                      (t) => t.type === "saida" && t.category_id === cat.id,
+                    ) && (
                       <span
                         style={{
                           fontSize: 11,
@@ -885,12 +1101,12 @@ export default function Caixa() {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "360px 1fr",
+        gridTemplateColumns: "280px 1fr",
         height: "100%",
         background: "#FAFAFA",
       }}
     >
-      {/* SIDEBAR - NOVO GASTO */}
+      {/* SIDEBAR */}
       <div
         style={{
           background: "#1f2937",
@@ -899,193 +1115,66 @@ export default function Caixa() {
           overflowY: "auto",
         }}
       >
-        <div style={{ padding: "20px", borderBottom: "1px solid #374151" }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-            💸 Novo Gasto
+        <div style={{ padding: "16px", borderBottom: "1px solid #374151" }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+            Ações Rápidas
           </h2>
         </div>
 
-        <div style={{ padding: "20px" }}>
-          {/* DATA */}
-          <div style={{ marginBottom: 16 }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: 8,
-                fontSize: 12,
-                fontWeight: 500,
-                color: "#9ca3af",
-              }}
-            >
-              Data:
-            </label>
-            <input
-              type="date"
-              value={novo.data}
-              onChange={(e) => setNovo({ ...novo, data: e.target.value })}
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #374151",
-                background: "#374151",
-                color: "#fff",
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
-          </div>
-
-          {/* DESCRIÇÃO */}
-          <div style={{ marginBottom: 16 }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: 8,
-                fontSize: 12,
-                fontWeight: 500,
-                color: "#9ca3af",
-              }}
-            >
-              Descrição:
-            </label>
-            <input
-              placeholder="Ex: Compra de insumos"
-              value={novo.descricao}
-              onChange={(e) => setNovo({ ...novo, descricao: e.target.value })}
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #374151",
-                background: "#374151",
-                color: "#fff",
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
-          </div>
-
-          {/* CATEGORIA */}
-          <div style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 8,
-              }}
-            >
-              <label
-                style={{ fontSize: 12, fontWeight: 500, color: "#9ca3af" }}
-              >
-                Categoria:
-              </label>
-              <button
-                onClick={() => setShowModalGerenciar(true)}
-                style={{
-                  fontSize: 11,
-                  background: "none",
-                  border: "none",
-                  color: "#10b981",
-                  cursor: "pointer",
-                }}
-              >
-                ⚙️ Gerenciar
-              </button>
-            </div>
-            <select
-              value={novo.category_id}
-              onChange={(e) =>
-                setNovo({ ...novo, category_id: Number(e.target.value) })
-              }
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #374151",
-                background: "#374151",
-                color: "#fff",
-                fontSize: 14,
-                outline: "none",
-                cursor: "pointer",
-              }}
-            >
-              <option value={0}>Selecione uma categoria</option>
-              {categorias.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.icon} {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* VALOR */}
-          <div style={{ marginBottom: 20 }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: 8,
-                fontSize: 12,
-                fontWeight: 500,
-                color: "#9ca3af",
-              }}
-            >
-              Valor (R$):
-            </label>
-            <input
-              type="text"
-              placeholder="0,00"
-              value={
-                novo.valor === 0
-                  ? ""
-                  : novo.valor.toLocaleString("pt-BR", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })
-              }
-              onChange={(e) => {
-                let value = e.target.value.replace(/\D/g, "");
-                const cents = parseInt(value, 10);
-                if (isNaN(cents)) setNovo({ ...novo, valor: 0 });
-                else setNovo({ ...novo, valor: cents / 100 });
-              }}
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #374151",
-                background: "#374151",
-                color: "#fff",
-                fontSize: 14,
-                outline: "none",
-              }}
-            />
-          </div>
-
-          {/* BOTÃO */}
+        <div style={{ padding: "16px" }}>
           <button
-            onClick={adicionarGasto}
+            onClick={() => setShowModalSaida(true)}
             style={{
               width: "100%",
               padding: "10px",
-              background: "#10b981",
+              background: "#dc2626",
               color: "#fff",
               border: "none",
               borderRadius: 6,
               cursor: "pointer",
               fontWeight: 500,
-              fontSize: 14,
+              fontSize: 13,
+              marginBottom: 10,
             }}
           >
-            + Lançar Gasto
+            Nova Saída (Gasto)
           </button>
+
+          <button
+            onClick={() => setShowModalGerenciar(true)}
+            style={{
+              width: "100%",
+              padding: "10px",
+              background: "#374151",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontWeight: 500,
+              fontSize: 13,
+            }}
+          >
+            Gerenciar Categorias
+          </button>
+
+          <div
+            style={{
+              marginTop: 16,
+              padding: "10px",
+              background: "#374151",
+              borderRadius: 6,
+              fontSize: 11,
+              color: "#9ca3af",
+              textAlign: "center",
+            }}
+          >
+            Entradas importadas do PDV
+          </div>
         </div>
       </div>
 
-      {/* CONTEÚDO - LISTA DE GASTOS */}
+      {/* CONTEÚDO */}
       <div style={{ padding: "20px", overflowY: "auto", height: "100vh" }}>
-        {/* HEADER */}
         <div
           style={{
             background: "#fff",
@@ -1101,22 +1190,22 @@ export default function Caixa() {
               justifyContent: "space-between",
               alignItems: "center",
               flexWrap: "wrap",
-              gap: 16,
+              gap: 12,
             }}
           >
             <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-              📊 Gastos do Mês
+              Fluxo de Caixa
             </h2>
-            <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ display: "flex", gap: 10 }}>
               <select
                 value={mesSelecionado}
                 onChange={(e) => setMesSelecionado(Number(e.target.value))}
                 style={{
-                  padding: "8px 12px",
+                  padding: "6px 10px",
                   borderRadius: 6,
                   border: "1px solid #e5e7eb",
                   background: "#fff",
-                  fontSize: 14,
+                  fontSize: 13,
                   cursor: "pointer",
                 }}
               >
@@ -1130,11 +1219,11 @@ export default function Caixa() {
                 value={anoSelecionado}
                 onChange={(e) => setAnoSelecionado(Number(e.target.value))}
                 style={{
-                  padding: "8px 12px",
+                  padding: "6px 10px",
                   borderRadius: 6,
                   border: "1px solid #e5e7eb",
                   background: "#fff",
-                  fontSize: 14,
+                  fontSize: 13,
                   cursor: "pointer",
                 }}
               >
@@ -1146,74 +1235,159 @@ export default function Caixa() {
               </select>
             </div>
           </div>
-          <div style={{ marginTop: 12, textAlign: "right" }}>
-            <span style={{ fontSize: 14, color: "#6b7280" }}>
-              Total do mês:{" "}
-            </span>
-            <span
-              style={{ fontSize: 20, fontWeight: "bold", color: "#dc2626" }}
+
+          <div
+            style={{
+              marginTop: 14,
+              padding: "10px 0",
+              borderTop: "1px solid #e5e7eb",
+              borderBottom: "1px solid #e5e7eb",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 12,
+              }}
             >
-              {formatCurrency(totalGeral)}
-            </span>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>Entradas</div>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: "bold",
+                      color: "#10b981",
+                    }}
+                  >
+                    {formatCurrency(totalEntradas)}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>Saídas</div>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: "bold",
+                      color: "#dc2626",
+                    }}
+                  >
+                    {formatCurrency(totalSaidas)}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>Saldo</div>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: "bold",
+                      color: saldoGeral >= 0 ? "#10b981" : "#dc2626",
+                    }}
+                  >
+                    {formatCurrency(saldoGeral)}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+                <button
+                  onClick={() => setShowEntradas(!showEntradas)}
+                  style={{
+                    padding: "5px 14px",
+                    borderRadius: 20,
+                    border: "1px solid #10b981",
+                    background: showEntradas ? "#10b981" : "#fff",
+                    color: showEntradas ? "#fff" : "#10b981",
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Entradas
+                </button>
+                <button
+                  onClick={() => setShowSaidas(!showSaidas)}
+                  style={{
+                    padding: "5px 14px",
+                    borderRadius: 20,
+                    border: "1px solid #dc2626",
+                    background: showSaidas ? "#dc2626" : "#fff",
+                    color: showSaidas ? "#fff" : "#dc2626",
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Saídas
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* FILTRO POR CATEGORIA */}
-        <div
-          style={{
-            background: "#fff",
-            padding: "12px 16px",
-            borderRadius: 8,
-            marginBottom: 16,
-            border: "1px solid #e5e7eb",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 500 }}>
-            Filtrar por categoria:
-          </span>
-          <button
-            onClick={() => setFiltroCategoria(null)}
+        {categorias.length > 0 && (
+          <div
             style={{
-              padding: "4px 12px",
-              borderRadius: 20,
+              background: "#fff",
+              padding: "10px 14px",
+              borderRadius: 8,
+              marginBottom: 16,
               border: "1px solid #e5e7eb",
-              background: filtroCategoria === null ? "#10b981" : "#fff",
-              color: filtroCategoria === null ? "#fff" : "#374151",
-              cursor: "pointer",
-              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            Todos
-          </button>
-          {categorias.map((cat) => (
+            <span style={{ fontSize: 12, fontWeight: 500, color: "#374151" }}>
+              Filtrar por categoria:
+            </span>
             <button
-              key={cat.id}
-              onClick={() => setFiltroCategoria(cat.id)}
+              onClick={() => setFiltroCategoria(null)}
               style={{
-                padding: "4px 12px",
-                borderRadius: 20,
-                border: `1px solid ${cat.color}`,
-                background: filtroCategoria === cat.id ? cat.color : "#fff",
-                color: filtroCategoria === cat.id ? "#fff" : cat.color,
+                padding: "3px 10px",
+                borderRadius: 16,
+                border: "1px solid #e5e7eb",
+                background: filtroCategoria === null ? "#10b981" : "#fff",
+                color: filtroCategoria === null ? "#fff" : "#374151",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: 11,
+                whiteSpace: "nowrap",
               }}
             >
-              {cat.icon} {cat.name}
+              Todos
             </button>
-          ))}
-        </div>
+            {categorias.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setFiltroCategoria(cat.id)}
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 16,
+                  border: `1px solid ${cat.color}`,
+                  background: filtroCategoria === cat.id ? cat.color : "#fff",
+                  color: filtroCategoria === cat.id ? "#fff" : cat.color,
+                  cursor: "pointer",
+                  fontSize: 11,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {/* LISTA DE GASTOS AGRUPADA POR DATA */}
         {loading ? (
           <div style={{ textAlign: "center", padding: "40px" }}>
             Carregando...
           </div>
-        ) : Object.keys(gastosPorData).length === 0 ? (
+        ) : Object.keys(transacoesPorData).length === 0 ? (
           <div
             style={{
               textAlign: "center",
@@ -1222,59 +1396,78 @@ export default function Caixa() {
               borderRadius: 8,
             }}
           >
-            <div style={{ fontSize: 48, marginBottom: 12 }}>💰</div>
-            <p>Nenhum gasto registrado neste mês</p>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
+            <p>Nenhuma transação registrada neste mês</p>
           </div>
         ) : (
-          Object.keys(gastosPorData)
+          Object.keys(transacoesPorData)
             .sort((a, b) => b.localeCompare(a))
             .map((data) => {
               const estaExpandido = diasExpandidos[data] !== false;
-              const gastosDoDia = gastosPorData[data];
-              const totalDia = totalPorData[data];
+              const transacoesDoDia = transacoesPorData[data];
+              const totalEntradasDia = totalEntradasPorData[data] || 0;
+              const totalSaidasDia = totalSaidasPorData[data] || 0;
+              const saldoDia = (totalEntradasDia || 0) - (totalSaidasDia || 0);
 
               return (
-                <div key={data} style={{ marginBottom: 16 }}>
+                <div key={data} style={{ marginBottom: 12 }}>
                   <div
                     onClick={() => toggleDia(data)}
                     style={{
                       background: estaExpandido ? "#f3f4f6" : "#fff",
-                      padding: "12px 16px",
+                      padding: "10px 14px",
                       borderRadius: 8,
                       border: "1px solid #e5e7eb",
                       cursor: "pointer",
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: 8,
                     }}
                   >
                     <div
-                      style={{ display: "flex", alignItems: "center", gap: 12 }}
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
                     >
-                      <span style={{ fontSize: 18 }}>
+                      <span style={{ fontSize: 16 }}>
                         {estaExpandido ? "▼" : "▶"}
                       </span>
-                      <h3 style={{ margin: 0, fontSize: 15 }}>
-                        📅 {formatDate(data)}
+                      <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+                        {formatDate(data)}
                       </h3>
-                      <span style={{ fontSize: 12, color: "#6b7280" }}>
-                        ({gastosDoDia.length}{" "}
-                        {gastosDoDia.length === 1 ? "item" : "itens"})
+                      <span style={{ fontSize: 10, color: "#6b7280" }}>
+                        ({transacoesDoDia.length}{" "}
+                        {transacoesDoDia.length === 1 ? "item" : "itens"})
                       </span>
                     </div>
-                    <span
+                    <div
                       style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: "#dc2626",
+                        display: "flex",
+                        gap: 12,
+                        alignItems: "center",
+                        flexWrap: "wrap",
                       }}
                     >
-                      Total: {formatCurrency(totalDia)}
-                    </span>
+                      <span style={{ fontSize: 10, color: "#10b981" }}>
+                        Entradas: {formatCurrency(totalEntradasDia)}
+                      </span>
+                      <span style={{ fontSize: 10, color: "#dc2626" }}>
+                        Saídas: {formatCurrency(totalSaidasDia)}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: saldoDia >= 0 ? "#10b981" : "#dc2626",
+                        }}
+                      >
+                        Saldo: {formatCurrency(saldoDia)}
+                      </span>
+                    </div>
                   </div>
 
                   {estaExpandido && (
-                    <div style={{ marginTop: 8, overflowX: "auto" }}>
+                    <div style={{ marginTop: 6, overflowX: "auto" }}>
                       <table
                         style={{
                           width: "100%",
@@ -1292,32 +1485,50 @@ export default function Caixa() {
                           >
                             <th
                               style={{
-                                padding: "10px 16px",
+                                padding: "6px 10px",
                                 textAlign: "left",
+                                fontSize: 10,
+                                fontWeight: 600,
                               }}
                             >
                               Descrição
                             </th>
                             <th
                               style={{
-                                padding: "10px 16px",
+                                padding: "6px 10px",
                                 textAlign: "left",
+                                fontSize: 10,
+                                fontWeight: 600,
                               }}
                             >
                               Categoria
                             </th>
                             <th
                               style={{
-                                padding: "10px 16px",
+                                padding: "6px 10px",
+                                textAlign: "left",
+                                fontSize: 10,
+                                fontWeight: 600,
+                              }}
+                            >
+                              Tipo
+                            </th>
+                            <th
+                              style={{
+                                padding: "6px 10px",
                                 textAlign: "right",
+                                fontSize: 10,
+                                fontWeight: 600,
                               }}
                             >
                               Valor
                             </th>
                             <th
                               style={{
-                                padding: "10px 16px",
+                                padding: "6px 10px",
                                 textAlign: "center",
+                                fontSize: 10,
+                                fontWeight: 600,
                               }}
                             >
                               Ações
@@ -1325,60 +1536,101 @@ export default function Caixa() {
                           </tr>
                         </thead>
                         <tbody>
-                          {gastosDoDia.map((g: Expense) => (
+                          {transacoesDoDia.map((t: Transaction) => (
                             <tr
-                              key={g.id}
+                              key={`${t.type}-${t.id}`}
                               style={{ borderBottom: "1px solid #f0f0f0" }}
                             >
                               <td
-                                style={{ padding: "10px 16px" }}
-                                title={g.description}
+                                style={{ padding: "6px 10px", fontSize: 11 }}
+                                title={t.description}
                               >
-                                {g.description}
+                                {t.description.length > 35
+                                  ? t.description.substring(0, 35) + "..."
+                                  : t.description}
                               </td>
-                              <td style={{ padding: "10px 16px" }}>
-                                {g.category && (
+                              <td style={{ padding: "6px 10px" }}>
+                                {t.type === "entrada" ? (
                                   <span
                                     style={{
                                       display: "inline-block",
-                                      padding: "2px 8px",
-                                      borderRadius: 16,
-                                      fontSize: 11,
-                                      background: `${g.category.color}15`,
-                                      color: g.category.color,
+                                      padding: "2px 6px",
+                                      borderRadius: 12,
+                                      fontSize: 9,
+                                      background: "#d1fae5",
+                                      color: "#059669",
                                     }}
                                   >
-                                    {g.category.icon} {g.category.name}
+                                    PDV
+                                  </span>
+                                ) : t.category ? (
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      padding: "2px 6px",
+                                      borderRadius: 12,
+                                      fontSize: 9,
+                                      background: `${t.category.color}15`,
+                                      color: t.category.color,
+                                    }}
+                                  >
+                                    {t.category.name}
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{ fontSize: 10, color: "#9ca3af" }}
+                                  >
+                                    Sem categoria
                                   </span>
                                 )}
                               </td>
-                              <td
-                                style={{
-                                  padding: "10px 16px",
-                                  textAlign: "right",
-                                  fontWeight: 600,
-                                  color: "#dc2626",
-                                }}
-                              >
-                                {formatCurrency(g.amount)}
+                              <td style={{ padding: "6px 10px", fontSize: 11 }}>
+                                {t.type === "entrada" ? "Entrada" : "Saída"}
                               </td>
                               <td
                                 style={{
-                                  padding: "10px 16px",
+                                  padding: "6px 10px",
+                                  textAlign: "right",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color:
+                                    t.type === "entrada"
+                                      ? "#10b981"
+                                      : "#dc2626",
+                                }}
+                              >
+                                {formatCurrency(t.amount)}
+                              </td>
+                              <td
+                                style={{
+                                  padding: "6px 10px",
                                   textAlign: "center",
                                 }}
                               >
-                                <button
-                                  onClick={() => removerGasto(g.id)}
-                                  style={{
-                                    background: "none",
-                                    border: "none",
-                                    fontSize: 18,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  🗑️
-                                </button>
+                                {t.type === "saida" && (
+                                  <button
+                                    onClick={() =>
+                                      removerTransacao(t.id, t.type, t.source)
+                                    }
+                                    style={{
+                                      background: "none",
+                                      border: "none",
+                                      fontSize: 14,
+                                      cursor: "pointer",
+                                      color: "#dc2626",
+                                    }}
+                                    title="Remover"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                                {t.type === "entrada" && (
+                                  <span
+                                    style={{ fontSize: 10, color: "#9ca3af" }}
+                                  >
+                                    PDV
+                                  </span>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -1392,9 +1644,9 @@ export default function Caixa() {
         )}
       </div>
 
-      {/* MODAIS */}
       {showModalGerenciar && <ModalGerenciarCategorias />}
       {showModalCategoria && <ModalAdicionarCategoria />}
+      {showModalSaida && <ModalAdicionarSaida />}
     </div>
   );
 }
