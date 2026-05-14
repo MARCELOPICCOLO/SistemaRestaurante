@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { SidebarCaixa } from "../../components/SidebarCaixa";
+import { TabelaGastos } from "../../components/TabelaGastos";
+import { HeaderCaixa } from "../../components/HeaderCaixa";
+import { FiltrosCaixa } from "../../components/FiltrosCaixa";
+import { ModalAdicionarCategoria } from "../../components/ModalAdicionarCategoria";
+import { ModalAdicionarSaida } from "../../components/ModalAdicionarSaida";
+import { ModalGerenciarCategorias } from "../../components/ModalGerenciarCategorias";
+import { ModalImportarGastos } from "../../components/ModalImportarGastos";
+import { ModalImportarVendas } from "../../components/ModalImportarVendas";
 
 interface Transaction {
   id: number;
@@ -67,8 +76,6 @@ export default function Caixa() {
 
   const [filtroCategoria, setFiltroCategoria] = useState<number | null>(null);
 
-  const isFirstRender = useRef(true);
-
   const cores = [
     "#dc2626",
     "#f59e0b",
@@ -87,7 +94,14 @@ export default function Caixa() {
     "#f43f5e",
   ];
 
-  const fetchCategorias = async () => {
+  const [showModalImportarGastos, setShowModalImportarGastos] = useState(false);
+  const [showModalImportarVendas, setShowModalImportarVendas] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [importing, setImporting] = useState(false);
+
+  // Buscar categorias
+  const fetchCategorias = useCallback(async () => {
     try {
       const response = await fetch(
         "http://localhost:8000/api/expense-categories?restaurant_id=1",
@@ -102,8 +116,9 @@ export default function Caixa() {
     } catch (error) {
       console.error("Erro ao buscar categorias:", error);
     }
-  };
+  }, [novaSaida.category_id]);
 
+  // Buscar entradas (vendas do PDV)
   const fetchEntradas = useCallback(async () => {
     try {
       const startDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-01`;
@@ -146,6 +161,7 @@ export default function Caixa() {
     }
   }, [anoSelecionado, mesSelecionado]);
 
+  // Buscar saídas (gastos)
   const fetchSaidas = useCallback(async () => {
     try {
       const startDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-01`;
@@ -181,8 +197,8 @@ export default function Caixa() {
     }
   }, [anoSelecionado, mesSelecionado, categorias]);
 
+  // Buscar todas as transações
   const fetchTransacoes = useCallback(async () => {
-    if (loading) return;
     setLoading(true);
     try {
       const [entradas, saidas] = await Promise.all([
@@ -207,25 +223,21 @@ export default function Caixa() {
     } finally {
       setLoading(false);
     }
-  }, [fetchEntradas, fetchSaidas, loading]);
+  }, [fetchEntradas, fetchSaidas]);
 
+  // Efeito para carregar categorias uma vez
   useEffect(() => {
     fetchCategorias();
-  }, []);
+  }, [fetchCategorias]);
 
+  // Efeito para carregar transações quando categorias, ano ou mês mudarem
   useEffect(() => {
-    if (categorias.length > 0 && !isFirstRender.current) {
+    if (categorias.length > 0) {
       fetchTransacoes();
     }
-  }, [anoSelecionado, mesSelecionado]);
+  }, [anoSelecionado, mesSelecionado, categorias, fetchTransacoes]);
 
-  useEffect(() => {
-    if (categorias.length > 0 && isFirstRender.current) {
-      fetchTransacoes();
-      isFirstRender.current = false;
-    }
-  }, [categorias]);
-
+  // Adicionar categoria
   const adicionarCategoria = async () => {
     if (!novaCategoria.name.trim()) {
       alert("Digite o nome da categoria");
@@ -260,6 +272,260 @@ export default function Caixa() {
       console.error(error);
       alert("Erro ao adicionar categoria");
     }
+  };
+
+  // Processar arquivo CSV
+  const processCSV = (file: File, callback: (data: any[]) => void) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const lines = text.split("\n");
+
+      const firstLine = lines[0].toLowerCase();
+      const hasHeader =
+        firstLine.includes("descricao") ||
+        firstLine.includes("description") ||
+        firstLine.includes("data") ||
+        firstLine.includes("valor") ||
+        firstLine.includes("cliente");
+
+      let headers: string[] = [];
+      let startRow = 0;
+
+      if (hasHeader) {
+        headers = lines[0].split(",").map((h) => h.trim().replace(/"/g, ""));
+        startRow = 1;
+      } else {
+        headers = ["data", "descricao", "valor"];
+        startRow = 0;
+      }
+
+      const data = [];
+      for (let i = startRow; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+
+        const values: string[] = [];
+        let inQuotes = false;
+        let currentValue = "";
+
+        for (let j = 0; j < lines[i].length; j++) {
+          const char = lines[i][j];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === "," && !inQuotes) {
+            values.push(currentValue.trim());
+            currentValue = "";
+          } else {
+            currentValue += char;
+          }
+        }
+        values.push(currentValue.trim());
+
+        const row: any = {};
+        headers.forEach((header, index) => {
+          if (index < values.length) {
+            row[header] = values[index];
+          }
+        });
+
+        if (!hasHeader && Object.keys(row).length === 3) {
+          row.data = values[0];
+          row.descricao = values[1];
+          row.valor = values[2];
+        }
+
+        data.push(row);
+      }
+
+      callback(data);
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
+  // Função para converter data brasileira (DD/MM/YYYY) para formato ISO (YYYY-MM-DD)
+  const parseBrazilianDate = (dateStr: string): string => {
+    if (!dateStr) return "";
+
+    const cleanDate = dateStr.trim();
+
+    if (cleanDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return cleanDate;
+    }
+
+    if (cleanDate.includes("/")) {
+      const parts = cleanDate.split("/");
+      if (parts.length === 3) {
+        let day = parts[0].padStart(2, "0");
+        let month = parts[1].padStart(2, "0");
+        let year = parts[2];
+
+        if (year.length === 2) {
+          year = "20" + year;
+        }
+
+        return `${year}-${month}-${day}`;
+      }
+    }
+
+    return cleanDate;
+  };
+
+  // Importar gastos do CSV
+  const importarGastosCSV = async () => {
+    if (!importFile) {
+      alert("Selecione um arquivo CSV");
+      return;
+    }
+
+    setImporting(true);
+    processCSV(importFile, async (data) => {
+      let sucesso = 0;
+      let erros = 0;
+
+      for (const row of data) {
+        try {
+          const description = row.descricao || row.description || row.Descricao;
+          const amount = parseFloat(row.valor || row.amount || row.Valor);
+          let dateStr = row.data || row.date || row.Data;
+          const categoryName = row.categoria || row.category || row.Categoria;
+
+          if (!description || isNaN(amount) || !dateStr) {
+            erros++;
+            continue;
+          }
+
+          const date = parseBrazilianDate(dateStr);
+
+          if (!date) {
+            erros++;
+            continue;
+          }
+
+          const categoria = categorias.find(
+            (c) => c.name.toLowerCase() === categoryName?.toLowerCase(),
+          );
+
+          const response = await fetch("http://localhost:8000/api/expenses", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              restaurant_id: 1,
+              description: description,
+              amount: amount,
+              expense_date: date,
+              category_id: categoria?.id || categorias[0]?.id || 1,
+              type: "saida",
+              notes: `Importado via CSV em ${new Date().toLocaleString()}. Original: ${dateStr}`,
+            }),
+          });
+
+          if (response.ok) {
+            sucesso++;
+          } else {
+            erros++;
+          }
+        } catch (error) {
+          erros++;
+        }
+      }
+
+      alert(
+        `Importação concluída!\n✅ Sucesso: ${sucesso}\n❌ Erros: ${erros}`,
+      );
+      setShowModalImportarGastos(false);
+      setImportFile(null);
+      setImportPreview([]);
+      fetchTransacoes();
+      setImporting(false);
+    });
+  };
+
+  // Importar vendas do CSV
+  const importarVendasCSV = async () => {
+    if (!importFile) {
+      alert("Selecione um arquivo CSV");
+      return;
+    }
+
+    setImporting(true);
+    processCSV(importFile, async (data) => {
+      let sucesso = 0;
+      let erros = 0;
+
+      for (const row of data) {
+        try {
+          const customerName =
+            row.cliente || row.customer_name || row.Cliente || "Cliente CSV";
+          const amount = parseFloat(
+            row.valor || row.total || row.Valor || row.Total,
+          );
+          let dateStr = row.data || row.date || row.Data;
+          const paymentMethod =
+            row.pagamento || row.payment_method || row.Pagamento || "dinheiro";
+
+          if (isNaN(amount) || !dateStr) {
+            erros++;
+            continue;
+          }
+
+          const date = parseBrazilianDate(dateStr);
+
+          if (!date) {
+            erros++;
+            continue;
+          }
+
+          const response = await fetch("http://localhost:8000/api/orders", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              restaurant_id: 1,
+              table_id: 1,
+              customer_name: customerName,
+              status: "fechado",
+              total: amount,
+              payment_method: paymentMethod,
+              closed_at: date,
+            }),
+          });
+
+          if (response.ok) {
+            sucesso++;
+          } else {
+            erros++;
+          }
+        } catch (error) {
+          erros++;
+        }
+      }
+
+      alert(
+        `Importação concluída!\n✅ Sucesso: ${sucesso}\n❌ Erros: ${erros}`,
+      );
+      setShowModalImportarVendas(false);
+      setImportFile(null);
+      setImportPreview([]);
+      fetchTransacoes();
+      setImporting(false);
+    });
+  };
+
+  // Visualizar preview do CSV
+  const previewCSV = (file: File) => {
+    processCSV(file, (data) => {
+      const formattedData = data.slice(0, 5).map((row) => ({
+        ...row,
+        data_original: row.data || row.date || row.Data,
+        data_convertida: parseBrazilianDate(row.data || row.date || row.Data),
+      }));
+      setImportPreview(formattedData);
+    });
   };
 
   const editarCategoria = async () => {
@@ -527,576 +793,6 @@ export default function Caixa() {
     { value: 12, label: "Dezembro" },
   ];
 
-  const ModalAdicionarSaida = () => (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1001,
-      }}
-      onClick={() => setShowModalSaida(false)}
-    >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          padding: 24,
-          width: "90%",
-          maxWidth: 450,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ margin: "0 0 20px 0", fontSize: 20 }}>
-          Nova Saída (Gasto)
-        </h2>
-
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Data:
-          </label>
-          <input
-            type="date"
-            value={novaSaida.data}
-            onChange={(e) =>
-              setNovaSaida({ ...novaSaida, data: e.target.value })
-            }
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          />
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Descrição:
-          </label>
-          <input
-            type="text"
-            placeholder="Ex: Compra de insumos..."
-            value={novaSaida.descricao}
-            onChange={(e) =>
-              setNovaSaida({ ...novaSaida, descricao: e.target.value })
-            }
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-            autoFocus
-          />
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Categoria:
-          </label>
-          <select
-            value={novaSaida.category_id}
-            onChange={(e) =>
-              setNovaSaida({
-                ...novaSaida,
-                category_id: Number(e.target.value),
-              })
-            }
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          >
-            <option value={0}>Selecione uma categoria</option>
-            {categorias.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Valor (R$):
-          </label>
-          <input
-            type="text"
-            placeholder="0,00"
-            value={
-              novaSaida.valor === 0
-                ? ""
-                : novaSaida.valor.toLocaleString("pt-BR", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })
-            }
-            onChange={(e) => {
-              let value = e.target.value.replace(/\D/g, "");
-              const cents = parseInt(value, 10);
-              if (isNaN(cents)) setNovaSaida({ ...novaSaida, valor: 0 });
-              else setNovaSaida({ ...novaSaida, valor: cents / 100 });
-            }}
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          />
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <button
-            onClick={() => setShowModalSaida(false)}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={adicionarSaida}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: 8,
-              border: "none",
-              background: "#dc2626",
-              color: "#fff",
-              fontWeight: "bold",
-              cursor: "pointer",
-            }}
-          >
-            Adicionar Saída
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const ModalAdicionarCategoria = () => (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1002,
-      }}
-      onClick={() => setShowModalCategoria(false)}
-    >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          padding: 24,
-          width: "90%",
-          maxWidth: 450,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ margin: "0 0 20px 0", fontSize: 20 }}>Nova Categoria</h2>
-
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Nome:
-          </label>
-          <input
-            type="text"
-            placeholder="Ex: Combustível, Verduras..."
-            value={novaCategoria.name}
-            onChange={(e) =>
-              setNovaCategoria({ ...novaCategoria, name: e.target.value })
-            }
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-            autoFocus
-          />
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Cor:
-          </label>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
-              marginBottom: 8,
-            }}
-          >
-            {cores.map((cor) => (
-              <button
-                key={cor}
-                onClick={() =>
-                  setNovaCategoria({ ...novaCategoria, color: cor })
-                }
-                style={{
-                  width: 32,
-                  height: 32,
-                  background: cor,
-                  border:
-                    novaCategoria.color === cor
-                      ? "2px solid #10b981"
-                      : "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                }}
-              />
-            ))}
-          </div>
-          <input
-            type="color"
-            value={novaCategoria.color}
-            onChange={(e) =>
-              setNovaCategoria({ ...novaCategoria, color: e.target.value })
-            }
-            style={{
-              width: "100%",
-              padding: "8px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              cursor: "pointer",
-            }}
-          />
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <button
-            onClick={() => setShowModalCategoria(false)}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={adicionarCategoria}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: 8,
-              border: "none",
-              background: "#10b981",
-              color: "#fff",
-              fontWeight: "bold",
-              cursor: "pointer",
-            }}
-          >
-            Criar
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const ModalGerenciarCategorias = () => (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-      onClick={() => {
-        setShowModalGerenciar(false);
-        setEditandoCategoria(null);
-      }}
-    >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          padding: 24,
-          width: "90%",
-          maxWidth: 550,
-          maxHeight: "80vh",
-          overflowY: "auto",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 20,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 20 }}>Gerenciar Categorias</h2>
-          <button
-            onClick={() => setShowModalCategoria(true)}
-            style={{
-              padding: "6px 12px",
-              background: "#10b981",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            + Nova Categoria
-          </button>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {categorias.map((cat) => (
-            <div
-              key={cat.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "12px 16px",
-                background: "#f9fafb",
-                borderRadius: 8,
-                border: "1px solid #e5e7eb",
-              }}
-            >
-              {editandoCategoria?.id === cat.id ? (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={editandoCategoria.name}
-                    onChange={(e) =>
-                      setEditandoCategoria({
-                        ...editandoCategoria,
-                        name: e.target.value,
-                      })
-                    }
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      border: "1px solid #e5e7eb",
-                      flex: 1,
-                    }}
-                    autoFocus
-                  />
-                  <input
-                    type="color"
-                    value={editandoCategoria.color}
-                    onChange={(e) =>
-                      setEditandoCategoria({
-                        ...editandoCategoria,
-                        color: e.target.value,
-                      })
-                    }
-                    style={{
-                      width: 50,
-                      height: 36,
-                      borderRadius: 6,
-                      border: "1px solid #e5e7eb",
-                      cursor: "pointer",
-                    }}
-                  />
-                  <button
-                    onClick={editarCategoria}
-                    style={{
-                      padding: "6px 12px",
-                      background: "#10b981",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Salvar
-                  </button>
-                  <button
-                    onClick={() => setEditandoCategoria(null)}
-                    style={{
-                      padding: "6px 12px",
-                      background: "#6b7280",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 12 }}
-                  >
-                    <span
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: 4,
-                        background: cat.color,
-                        border: "1px solid #e5e7eb",
-                      }}
-                    />
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>
-                      {cat.name}
-                    </span>
-                    {transacoes.some(
-                      (t) => t.type === "saida" && t.category_id === cat.id,
-                    ) && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#f59e0b",
-                          background: "#fef3c7",
-                          padding: "2px 6px",
-                          borderRadius: 12,
-                        }}
-                      >
-                        em uso
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={() => setEditandoCategoria(cat)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        fontSize: 18,
-                        cursor: "pointer",
-                        color: "#6b7280",
-                      }}
-                      title="Editar"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => excluirCategoria(cat.id, cat.name)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        fontSize: 18,
-                        cursor: "pointer",
-                        color: "#dc2626",
-                      }}
-                      title="Excluir"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <button
-          onClick={() => {
-            setShowModalGerenciar(false);
-            setEditandoCategoria(null);
-          }}
-          style={{
-            marginTop: 20,
-            width: "100%",
-            padding: "10px",
-            background: "#374151",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
-          Fechar
-        </button>
-      </div>
-    </div>
-  );
-
   return (
     <div
       style={{
@@ -1106,547 +802,106 @@ export default function Caixa() {
         background: "#FAFAFA",
       }}
     >
-      {/* SIDEBAR */}
-      <div
-        style={{
-          background: "#1f2937",
-          color: "#fff",
-          height: "100vh",
-          overflowY: "auto",
-        }}
-      >
-        <div style={{ padding: "16px", borderBottom: "1px solid #374151" }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-            Ações Rápidas
-          </h2>
-        </div>
-
-        <div style={{ padding: "16px" }}>
-          <button
-            onClick={() => setShowModalSaida(true)}
-            style={{
-              width: "100%",
-              padding: "10px",
-              background: "#dc2626",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontWeight: 500,
-              fontSize: 13,
-              marginBottom: 10,
-            }}
-          >
-            Nova Saída (Gasto)
-          </button>
-
-          <button
-            onClick={() => setShowModalGerenciar(true)}
-            style={{
-              width: "100%",
-              padding: "10px",
-              background: "#374151",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontWeight: 500,
-              fontSize: 13,
-            }}
-          >
-            Gerenciar Categorias
-          </button>
-
-          <div
-            style={{
-              marginTop: 16,
-              padding: "10px",
-              background: "#374151",
-              borderRadius: 6,
-              fontSize: 11,
-              color: "#9ca3af",
-              textAlign: "center",
-            }}
-          >
-            Entradas importadas do PDV
-          </div>
-        </div>
-      </div>
+      <SidebarCaixa
+        setShowModalSaida={setShowModalSaida}
+        setShowModalGerenciar={setShowModalGerenciar}
+        setShowModalImportarGastos={setShowModalImportarGastos}
+        setShowModalImportarVendas={setShowModalImportarVendas}
+      />
 
       {/* CONTEÚDO */}
       <div style={{ padding: "20px", overflowY: "auto", height: "100vh" }}>
-        <div
-          style={{
-            background: "#fff",
-            padding: "16px 20px",
-            borderRadius: 8,
-            marginBottom: 20,
-            border: "1px solid #e5e7eb",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: 12,
-            }}
-          >
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-              Fluxo de Caixa
-            </h2>
-            <div style={{ display: "flex", gap: 10 }}>
-              <select
-                value={mesSelecionado}
-                onChange={(e) => setMesSelecionado(Number(e.target.value))}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  border: "1px solid #e5e7eb",
-                  background: "#fff",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                {meses.map((mes) => (
-                  <option key={mes.value} value={mes.value}>
-                    {mes.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={anoSelecionado}
-                onChange={(e) => setAnoSelecionado(Number(e.target.value))}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  border: "1px solid #e5e7eb",
-                  background: "#fff",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                {anos.map((ano) => (
-                  <option key={ano} value={ano}>
-                    {ano}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+        <HeaderCaixa
+          mesSelecionado={mesSelecionado}
+          setMesSelecionado={setMesSelecionado}
+          anoSelecionado={anoSelecionado}
+          setAnoSelecionado={setAnoSelecionado}
+          showEntradas={showEntradas}
+          setShowEntradas={setShowEntradas}
+          showSaidas={showSaidas}
+          setShowSaidas={setShowSaidas}
+          totalEntradas={totalEntradas}
+          totalSaidas={totalSaidas}
+          saldoGeral={saldoGeral}
+          formatCurrency={formatCurrency}
+          anos={anos}
+          meses={meses}
+        />
 
-          <div
-            style={{
-              marginTop: 14,
-              padding: "10px 0",
-              borderTop: "1px solid #e5e7eb",
-              borderBottom: "1px solid #e5e7eb",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: 12,
-              }}
-            >
-              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>Entradas</div>
-                  <div
-                    style={{
-                      fontSize: 18,
-                      fontWeight: "bold",
-                      color: "#10b981",
-                    }}
-                  >
-                    {formatCurrency(totalEntradas)}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>Saídas</div>
-                  <div
-                    style={{
-                      fontSize: 18,
-                      fontWeight: "bold",
-                      color: "#dc2626",
-                    }}
-                  >
-                    {formatCurrency(totalSaidas)}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>Saldo</div>
-                  <div
-                    style={{
-                      fontSize: 18,
-                      fontWeight: "bold",
-                      color: saldoGeral >= 0 ? "#10b981" : "#dc2626",
-                    }}
-                  >
-                    {formatCurrency(saldoGeral)}
-                  </div>
-                </div>
-              </div>
+        <FiltrosCaixa
+          categorias={categorias}
+          filtroCategoria={filtroCategoria}
+          setFiltroCategoria={setFiltroCategoria}
+        />
 
-              <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
-                <button
-                  onClick={() => setShowEntradas(!showEntradas)}
-                  style={{
-                    padding: "5px 14px",
-                    borderRadius: 20,
-                    border: "1px solid #10b981",
-                    background: showEntradas ? "#10b981" : "#fff",
-                    color: showEntradas ? "#fff" : "#10b981",
-                    cursor: "pointer",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Entradas
-                </button>
-                <button
-                  onClick={() => setShowSaidas(!showSaidas)}
-                  style={{
-                    padding: "5px 14px",
-                    borderRadius: 20,
-                    border: "1px solid #dc2626",
-                    background: showSaidas ? "#dc2626" : "#fff",
-                    color: showSaidas ? "#fff" : "#dc2626",
-                    cursor: "pointer",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Saídas
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {categorias.length > 0 && (
-          <div
-            style={{
-              background: "#fff",
-              padding: "10px 14px",
-              borderRadius: 8,
-              marginBottom: 16,
-              border: "1px solid #e5e7eb",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 500, color: "#374151" }}>
-              Filtrar por categoria:
-            </span>
-            <button
-              onClick={() => setFiltroCategoria(null)}
-              style={{
-                padding: "3px 10px",
-                borderRadius: 16,
-                border: "1px solid #e5e7eb",
-                background: filtroCategoria === null ? "#10b981" : "#fff",
-                color: filtroCategoria === null ? "#fff" : "#374151",
-                cursor: "pointer",
-                fontSize: 11,
-                whiteSpace: "nowrap",
-              }}
-            >
-              Todos
-            </button>
-            {categorias.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setFiltroCategoria(cat.id)}
-                style={{
-                  padding: "3px 10px",
-                  borderRadius: 16,
-                  border: `1px solid ${cat.color}`,
-                  background: filtroCategoria === cat.id ? cat.color : "#fff",
-                  color: filtroCategoria === cat.id ? "#fff" : cat.color,
-                  cursor: "pointer",
-                  fontSize: 11,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {cat.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "40px" }}>
-            Carregando...
-          </div>
-        ) : Object.keys(transacoesPorData).length === 0 ? (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "40px",
-              background: "#fff",
-              borderRadius: 8,
-            }}
-          >
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
-            <p>Nenhuma transação registrada neste mês</p>
-          </div>
-        ) : (
-          Object.keys(transacoesPorData)
-            .sort((a, b) => b.localeCompare(a))
-            .map((data) => {
-              const estaExpandido = diasExpandidos[data] !== false;
-              const transacoesDoDia = transacoesPorData[data];
-              const totalEntradasDia = totalEntradasPorData[data] || 0;
-              const totalSaidasDia = totalSaidasPorData[data] || 0;
-              const saldoDia = (totalEntradasDia || 0) - (totalSaidasDia || 0);
-
-              return (
-                <div key={data} style={{ marginBottom: 12 }}>
-                  <div
-                    onClick={() => toggleDia(data)}
-                    style={{
-                      background: estaExpandido ? "#f3f4f6" : "#fff",
-                      padding: "10px 14px",
-                      borderRadius: 8,
-                      border: "1px solid #e5e7eb",
-                      cursor: "pointer",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 8,
-                    }}
-                  >
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 10 }}
-                    >
-                      <span style={{ fontSize: 16 }}>
-                        {estaExpandido ? "▼" : "▶"}
-                      </span>
-                      <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
-                        {formatDate(data)}
-                      </h3>
-                      <span style={{ fontSize: 10, color: "#6b7280" }}>
-                        ({transacoesDoDia.length}{" "}
-                        {transacoesDoDia.length === 1 ? "item" : "itens"})
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 12,
-                        alignItems: "center",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <span style={{ fontSize: 10, color: "#10b981" }}>
-                        Entradas: {formatCurrency(totalEntradasDia)}
-                      </span>
-                      <span style={{ fontSize: 10, color: "#dc2626" }}>
-                        Saídas: {formatCurrency(totalSaidasDia)}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color: saldoDia >= 0 ? "#10b981" : "#dc2626",
-                        }}
-                      >
-                        Saldo: {formatCurrency(saldoDia)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {estaExpandido && (
-                    <div style={{ marginTop: 6, overflowX: "auto" }}>
-                      <table
-                        style={{
-                          width: "100%",
-                          background: "#fff",
-                          borderRadius: 8,
-                          borderCollapse: "collapse",
-                        }}
-                      >
-                        <thead>
-                          <tr
-                            style={{
-                              background: "#f9fafb",
-                              borderBottom: "1px solid #e5e7eb",
-                            }}
-                          >
-                            <th
-                              style={{
-                                padding: "6px 10px",
-                                textAlign: "left",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}
-                            >
-                              Descrição
-                            </th>
-                            <th
-                              style={{
-                                padding: "6px 10px",
-                                textAlign: "left",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}
-                            >
-                              Categoria
-                            </th>
-                            <th
-                              style={{
-                                padding: "6px 10px",
-                                textAlign: "left",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}
-                            >
-                              Tipo
-                            </th>
-                            <th
-                              style={{
-                                padding: "6px 10px",
-                                textAlign: "right",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}
-                            >
-                              Valor
-                            </th>
-                            <th
-                              style={{
-                                padding: "6px 10px",
-                                textAlign: "center",
-                                fontSize: 10,
-                                fontWeight: 600,
-                              }}
-                            >
-                              Ações
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {transacoesDoDia.map((t: Transaction) => (
-                            <tr
-                              key={`${t.type}-${t.id}`}
-                              style={{ borderBottom: "1px solid #f0f0f0" }}
-                            >
-                              <td
-                                style={{ padding: "6px 10px", fontSize: 11 }}
-                                title={t.description}
-                              >
-                                {t.description.length > 35
-                                  ? t.description.substring(0, 35) + "..."
-                                  : t.description}
-                              </td>
-                              <td style={{ padding: "6px 10px" }}>
-                                {t.type === "entrada" ? (
-                                  <span
-                                    style={{
-                                      display: "inline-block",
-                                      padding: "2px 6px",
-                                      borderRadius: 12,
-                                      fontSize: 9,
-                                      background: "#d1fae5",
-                                      color: "#059669",
-                                    }}
-                                  >
-                                    PDV
-                                  </span>
-                                ) : t.category ? (
-                                  <span
-                                    style={{
-                                      display: "inline-block",
-                                      padding: "2px 6px",
-                                      borderRadius: 12,
-                                      fontSize: 9,
-                                      background: `${t.category.color}15`,
-                                      color: t.category.color,
-                                    }}
-                                  >
-                                    {t.category.name}
-                                  </span>
-                                ) : (
-                                  <span
-                                    style={{ fontSize: 10, color: "#9ca3af" }}
-                                  >
-                                    Sem categoria
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ padding: "6px 10px", fontSize: 11 }}>
-                                {t.type === "entrada" ? "Entrada" : "Saída"}
-                              </td>
-                              <td
-                                style={{
-                                  padding: "6px 10px",
-                                  textAlign: "right",
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color:
-                                    t.type === "entrada"
-                                      ? "#10b981"
-                                      : "#dc2626",
-                                }}
-                              >
-                                {formatCurrency(t.amount)}
-                              </td>
-                              <td
-                                style={{
-                                  padding: "6px 10px",
-                                  textAlign: "center",
-                                }}
-                              >
-                                {t.type === "saida" && (
-                                  <button
-                                    onClick={() =>
-                                      removerTransacao(t.id, t.type, t.source)
-                                    }
-                                    style={{
-                                      background: "none",
-                                      border: "none",
-                                      fontSize: 14,
-                                      cursor: "pointer",
-                                      color: "#dc2626",
-                                    }}
-                                    title="Remover"
-                                  >
-                                    🗑️
-                                  </button>
-                                )}
-                                {t.type === "entrada" && (
-                                  <span
-                                    style={{ fontSize: 10, color: "#9ca3af" }}
-                                  >
-                                    PDV
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-        )}
+        <TabelaGastos
+          transacoesPorData={transacoesPorData}
+          diasExpandidos={diasExpandidos}
+          totalEntradasPorData={totalEntradasPorData}
+          totalSaidasPorData={totalSaidasPorData}
+          saldoPorData={saldoPorData}
+          loading={loading}
+          formatDate={formatDate}
+          formatCurrency={formatCurrency}
+          toggleDia={toggleDia}
+          removerTransacao={removerTransacao}
+        />
       </div>
 
-      {showModalGerenciar && <ModalGerenciarCategorias />}
-      {showModalCategoria && <ModalAdicionarCategoria />}
-      {showModalSaida && <ModalAdicionarSaida />}
+      {/* MODAIS */}
+      {showModalGerenciar && (
+        <ModalGerenciarCategorias
+          showModalGerenciar={showModalGerenciar}
+          setShowModalGerenciar={setShowModalGerenciar}
+          categorias={categorias}
+          editandoCategoria={editandoCategoria}
+          setEditandoCategoria={setEditandoCategoria}
+          transacoes={transacoes}
+          editarCategoria={editarCategoria}
+          excluirCategoria={excluirCategoria}
+          setShowModalCategoria={setShowModalCategoria}
+        />
+      )}
+
+      <ModalAdicionarCategoria
+        showModalCategoria={showModalCategoria}
+        setShowModalCategoria={setShowModalCategoria}
+        novaCategoria={novaCategoria}
+        setNovaCategoria={setNovaCategoria}
+        cores={cores}
+        adicionarCategoria={adicionarCategoria}
+      />
+
+      <ModalAdicionarSaida
+        showModalSaida={showModalSaida}
+        setShowModalSaida={setShowModalSaida}
+        novaSaida={novaSaida}
+        setNovaSaida={setNovaSaida}
+        categorias={categorias}
+        adicionarSaida={adicionarSaida}
+      />
+
+      <ModalImportarGastos
+        showModalImportarGastos={showModalImportarGastos}
+        setShowModalImportarGastos={setShowModalImportarGastos}
+        importFile={importFile}
+        setImportFile={setImportFile}
+        importPreview={importPreview}
+        importing={importing}
+        previewCSV={previewCSV}
+        importarGastosCSV={importarGastosCSV}
+      />
+
+      <ModalImportarVendas
+        showModalImportarVendas={showModalImportarVendas}
+        setShowModalImportarVendas={setShowModalImportarVendas}
+        importFile={importFile}
+        setImportFile={setImportFile}
+        importPreview={importPreview}
+        importing={importing}
+        previewCSV={previewCSV}
+        importarVendasCSV={importarVendasCSV}
+      />
     </div>
   );
 }

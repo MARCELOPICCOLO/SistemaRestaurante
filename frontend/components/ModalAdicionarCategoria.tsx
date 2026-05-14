@@ -1,0 +1,181 @@
+import React from "react";
+
+interface ModalAdicionarCategoriaProps {
+  showModalCategoria: boolean;
+  setShowModalCategoria: (show: boolean) => void;
+  novaCategoria: {
+    name: string;
+    icon: string;
+    color: string;
+  };
+  setNovaCategoria: React.Dispatch<
+    React.SetStateAction<{
+      name: string;
+      icon: string;
+      color: string;
+    }>
+  >;
+  cores: string[];
+  adicionarCategoria: () => void;
+}
+
+export const ModalAdicionarCategoria: React.FC<
+  ModalAdicionarCategoriaProps
+> = ({
+  showModalCategoria,
+  setShowModalCategoria,
+  novaCategoria,
+  setNovaCategoria,
+  cores,
+  adicionarCategoria,
+}) => {
+  if (!showModalCategoria) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1002,
+      }}
+      onClick={() => setShowModalCategoria(false)}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          padding: 24,
+          width: "90%",
+          maxWidth: 450,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: "0 0 20px 0", fontSize: 20 }}>Nova Categoria</h2>
+
+        <div style={{ marginBottom: 16 }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Nome:
+          </label>
+          <input
+            type="text"
+            placeholder="Ex: Combustível, Verduras..."
+            value={novaCategoria.name}
+            onChange={(e) =>
+              setNovaCategoria({ ...novaCategoria, name: e.target.value })
+            }
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              fontSize: 14,
+            }}
+            autoFocus
+          />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            Cor:
+          </label>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
+            {cores.map((cor) => (
+              <button
+                key={cor}
+                onClick={() =>
+                  setNovaCategoria({ ...novaCategoria, color: cor })
+                }
+                style={{
+                  width: 32,
+                  height: 32,
+                  background: cor,
+                  border:
+                    novaCategoria.color === cor
+                      ? "2px solid #10b981"
+                      : "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                }}
+              />
+            ))}
+          </div>
+          <input
+            type="color"
+            value={novaCategoria.color}
+            onChange={(e) =>
+              setNovaCategoria({ ...novaCategoria, color: e.target.value })
+            }
+            style={{
+              width: "100%",
+              padding: "8px",
+              borderRadius: 6,
+              border: "1px solid #e5e7eb",
+              cursor: "pointer",
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            onClick={() => setShowModalCategoria(false)}
+            style={{
+              flex: 1,
+              padding: "10px",
+              borderRadius: 8,
+              border: "1px solid #e5e7eb",
+              background: "#fff",
+              color: "#374151",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={adicionarCategoria}
+            style={{
+              flex: 1,
+              padding: "10px",
+              borderRadius: 8,
+              border: "none",
+              background: "#10b981",
+              color: "#fff",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            Criar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
