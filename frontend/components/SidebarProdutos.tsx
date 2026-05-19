@@ -1,57 +1,37 @@
 import React from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faArrowUp,
+  faBox,
+  faPlus,
   faTags,
-  faFileImport,
-  faFileExport,
-  faWallet,
-  faChartLine,
-  faPlusCircle,
-  faList,
+  faWarehouse,
 } from "@fortawesome/free-solid-svg-icons";
 
-interface SidebarCaixaProps {
-  setShowModalSaida: (show: boolean) => void;
-  setShowModalGerenciar: (show: boolean) => void;
-  setShowModalImportarGastos: (show: boolean) => void;
-  setShowModalImportarVendas: (show: boolean) => void;
+interface SidebarProdutosProps {
+  onNovoProduto: () => void;
+  onCategorias: () => void;
+  totalProdutos: number;
 }
 
-export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
-  setShowModalSaida,
-  setShowModalGerenciar,
-  setShowModalImportarGastos,
-  setShowModalImportarVendas,
+export const SidebarProdutos: React.FC<SidebarProdutosProps> = ({
+  onNovoProduto,
+  onCategorias,
+  totalProdutos,
 }) => {
   const menuItems = [
     {
-      id: "saida",
-      icon: faArrowUp,
-      label: "Nova Saída",
-      description: "Registrar gasto",
-      action: () => setShowModalSaida(true),
+      id: "novoProduto",
+      icon: faPlus,
+      label: "Novo Produto",
+      description: "Adicionar ao estoque",
+      action: onNovoProduto,
     },
     {
       id: "categorias",
       icon: faTags,
       label: "Categorias",
       description: "Gerenciar categorias",
-      action: () => setShowModalGerenciar(true),
-    },
-    {
-      id: "importarGastos",
-      icon: faFileImport,
-      label: "Importar Gastos",
-      description: "CSV ou Excel",
-      action: () => setShowModalImportarGastos(true),
-    },
-    {
-      id: "importarVendas",
-      icon: faFileExport,
-      label: "Importar Vendas",
-      description: "CSV ou Excel",
-      action: () => setShowModalImportarVendas(true),
+      action: onCategorias,
     },
   ];
 
@@ -81,14 +61,16 @@ export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
             }}
           >
             <FontAwesomeIcon
-              icon={faWallet}
+              icon={faBox}
               style={{ fontSize: 20, color: "#10b981" }}
             />
           </div>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Caixa</h2>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+              Produtos
+            </h2>
             <p style={{ margin: "2px 0 0", fontSize: 12, color: "#9ca3af" }}>
-              Gestão financeira
+              Gerenciamento de estoque
             </p>
           </div>
         </div>
@@ -145,10 +127,6 @@ export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
                   {item.description}
                 </div>
               </div>
-              <FontAwesomeIcon
-                icon={faChartLine}
-                style={{ fontSize: 12, color: "#4b5563" }}
-              />
             </button>
           ))}
         </div>
@@ -162,7 +140,29 @@ export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
           borderTop: "1px solid #374151",
           background: "#111827",
         }}
-      ></div>
+      >
+        <div
+          style={{
+            background: "#374151",
+            borderRadius: 10,
+            padding: "12px",
+            textAlign: "center",
+          }}
+        >
+          <FontAwesomeIcon
+            icon={faWarehouse}
+            style={{ fontSize: 20, color: "#10b981", marginBottom: 6 }}
+          />
+          <div style={{ fontSize: 11, color: "#9ca3af", lineHeight: 1.4 }}>
+            Total em estoque
+            <br />
+            <strong style={{ fontSize: 16, color: "#fff" }}>
+              {totalProdutos}
+            </strong>{" "}
+            produtos
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
