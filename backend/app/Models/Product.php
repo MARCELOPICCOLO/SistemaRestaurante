@@ -6,47 +6,48 @@ use Illuminate\Database\Eloquent\Model;
 
 class Product extends Model
 {
+    // ✅ GARANTA QUE TODOS OS CAMPOS ESTEJAM AQUI
     protected $fillable = [
         'restaurant_id',
         'category_id',
         'name',
-        'product_code',  // NOVO: código do produto
+        'product_code',
         'description',
         'price',
+        'quantity',      // ← CAMPO IMPORTANTE
         'active'
     ];
 
+    // ✅ CASTS PARA TIPOS CORRETOS
     protected $casts = [
         'price' => 'decimal:2',
+        'quantity' => 'integer',  // ← CAST PARA INTEGER
         'active' => 'boolean'
     ];
 
-    // Relacionamento com categoria
+    // ✅ RELACIONAMENTOS
     public function category()
     {
         return $this->belongsTo(Category::class);
     }
 
-    // Relacionamento com restaurante
     public function restaurant()
     {
         return $this->belongsTo(Restaurant::class);
     }
 
-    // Escopo para produtos ativos
+    // ✅ SCOPES ÚTEIS
     public function scopeActive($query)
     {
         return $query->where('active', true);
     }
 
-    // Escopo para buscar por código (único por restaurante)
     public function scopeByCode($query, $restaurantId, $code)
     {
         return $query->where('restaurant_id', $restaurantId)
             ->where('product_code', $code);
     }
 
-    // Escopo para buscar por nome ou código
     public function scopeSearch($query, $term)
     {
         return $query->where(function ($q) use ($term) {

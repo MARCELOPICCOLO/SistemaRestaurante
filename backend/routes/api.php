@@ -9,9 +9,17 @@ use App\Http\Controllers\TableController;
 use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\ExpenseCategoryController;
 
-// ========== PRODUTOS ==========
-Route::apiResource('products', ProductController::class);
-Route::get('/products/code/{code}', [ProductController::class, 'findByCode']);
+// Rotas para produtos
+// Rotas para produtos
+Route::prefix('products')->group(function () {
+    Route::get('/', [ProductController::class, 'index']);           // Listar
+    Route::get('/code/{code}', [ProductController::class, 'findByCode']); // Buscar por código
+    Route::post('/', [ProductController::class, 'store']);          // Criar
+    Route::get('/{id}', [ProductController::class, 'show']);        // Mostrar
+    Route::put('/{id}', [ProductController::class, 'update']);      // Atualizar
+    Route::delete('/{id}', [ProductController::class, 'destroy']);  // Deletar
+    Route::patch('/{id}/stock', [ProductController::class, 'updateStock']); // Atualizar estoque
+});
 
 // ========== CATEGORIAS ==========
 Route::apiResource('categories', CategoryController::class);
@@ -64,4 +72,5 @@ Route::prefix('expense-categories')->group(function () {
     Route::get('/{id}', [ExpenseCategoryController::class, 'show']);
     Route::put('/{id}', [ExpenseCategoryController::class, 'update']);
     Route::delete('/{id}', [ExpenseCategoryController::class, 'destroy']);
+    Route::post('/products/bulk-stock', [ProductController::class, 'bulkUpdateStock']);
 });
