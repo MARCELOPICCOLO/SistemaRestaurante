@@ -49,16 +49,7 @@ export default function Dashboard({ setTela }: DashboardProps) {
         "Gerencie seus pontos de atendimento, caixas e terminais de venda",
       icon: faStore,
       cor: "#10b981",
-      tela: "gestao_pontos", // ao invés de "pdv"
-    },
-    {
-      id: "catalogo",
-      titulo: "Catálogo de Produtos",
-      descricao:
-        "Cadastre e gerencie produtos, preços, categorias e informações",
-      icon: faConciergeBell,
-      cor: "#8b5cf6",
-      tela: "produtos",
+      tela: "gestao_pontos",
     },
     {
       id: "estoque",
@@ -67,16 +58,15 @@ export default function Dashboard({ setTela }: DashboardProps) {
         "Controle de entradas, saídas, níveis de estoque e movimentações",
       icon: faBoxes,
       cor: "#3b82f6",
-      tela: "estoque",
+      tela: "produtos", // Direciona para a página de produtos (que gerencia estoque)
     },
     {
-      id: "comandas",
-      titulo: "Gestão de Comandas",
-      descricao:
-        "Acompanhe pedidos, comandas e atendimentos ativos em tempo real",
-      icon: faClipboardList,
+      id: "vendas",
+      titulo: "Gestão de Vendas",
+      descricao: "Realize vendas, gerencie pedidos e atendimentos",
+      icon: faCashRegister,
       cor: "#eab308",
-      tela: "comandas",
+      tela: "vendas",
     },
     {
       id: "caixa",
@@ -288,7 +278,7 @@ export default function Dashboard({ setTela }: DashboardProps) {
             <div
               style={{ fontSize: "28px", fontWeight: "bold", color: "#10b981" }}
             >
-              7
+              {cards.length}
             </div>
             <div
               style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}

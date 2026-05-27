@@ -68,7 +68,9 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
       {Object.keys(transacoesPorData)
         .sort((a, b) => b.localeCompare(a))
         .map((data) => {
-          const estaExpandido = diasExpandidos[data] !== false;
+          // TODAS AS DATAS COMEÇAM MINIMIZADAS (FECHADAS)
+          // Se o estado não existir, assume false (fechado)
+          const estaExpandido = diasExpandidos[data] === true;
           const transacoesDoDia = transacoesPorData[data];
           const totalEntradasDia = totalEntradasPorData[data] || 0;
           const totalSaidasDia = totalSaidasPorData[data] || 0;
@@ -130,7 +132,7 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
                 </div>
               </div>
 
-              {/* TABELA DO DIA - EXPANSÍVEL */}
+              {/* TABELA DO DIA - EXPANSÍVEL (SÓ MOSTRA SE ESTIVER EXPANDIDO) */}
               {estaExpandido && (
                 <div style={{ marginTop: 6, overflowX: "auto" }}>
                   <table

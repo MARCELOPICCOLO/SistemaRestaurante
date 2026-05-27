@@ -7,7 +7,7 @@ interface Category {
 }
 
 interface FormData {
-  id?: number; // Adicionar id para edição
+  id?: number;
   name: string;
   product_code: string;
   price: number;
@@ -47,7 +47,6 @@ export const ModalProduto: React.FC<ModalProdutoProps> = ({
       return true;
     }
 
-    // ✅ VERIFICAR SE É EDIÇÃO - IGNORAR O PRÓPRIO PRODUTO
     const existe = produtosExistentes.some(
       (p) => p.product_code === codigo && (!editando || p.id !== formData.id),
     );
@@ -165,11 +164,7 @@ export const ModalProduto: React.FC<ModalProdutoProps> = ({
         justifyContent: "center",
         zIndex: 1000,
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          setShowModal(false);
-        }
-      }}
+      // REMOVIDO o onClick que fechava o modal ao clicar fora
     >
       <form
         onSubmit={handleSubmit}
@@ -182,7 +177,6 @@ export const ModalProduto: React.FC<ModalProdutoProps> = ({
           maxHeight: "80vh",
           overflowY: "auto",
         }}
-        onClick={(e) => e.stopPropagation()}
       >
         <h2 style={{ margin: "0 0 20px 0", fontSize: 20 }}>
           {editando ? "Editar Produto" : "Novo Produto"}

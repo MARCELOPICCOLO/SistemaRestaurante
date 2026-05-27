@@ -7,8 +7,7 @@ import {
   faFileExport,
   faWallet,
   faChartLine,
-  faPlusCircle,
-  faList,
+  faArrowLeft,
 } from "@fortawesome/free-solid-svg-icons";
 
 interface SidebarCaixaProps {
@@ -16,6 +15,7 @@ interface SidebarCaixaProps {
   setShowModalGerenciar: (show: boolean) => void;
   setShowModalImportarGastos: (show: boolean) => void;
   setShowModalImportarVendas: (show: boolean) => void;
+  onVoltarDashboard?: () => void;
 }
 
 export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
@@ -23,6 +23,7 @@ export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
   setShowModalGerenciar,
   setShowModalImportarGastos,
   setShowModalImportarVendas,
+  onVoltarDashboard,
 }) => {
   const menuItems = [
     {
@@ -66,6 +67,42 @@ export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
         flexDirection: "column",
       }}
     >
+      {/* Botão Voltar ao Dashboard - NO TOPO */}
+      {onVoltarDashboard && (
+        <div
+          style={{ padding: "16px 20px", borderBottom: "1px solid #374151" }}
+        >
+          <button
+            onClick={onVoltarDashboard}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "100%",
+              padding: "10px 16px",
+              background: "transparent",
+              border: "1px solid #374151",
+              borderRadius: 8,
+              cursor: "pointer",
+              transition: "all 0.2s",
+              color: "#9ca3af",
+              fontSize: 13,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#374151";
+              e.currentTarget.style.color = "#fff";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#9ca3af";
+            }}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} />
+            Voltar ao Dashboard
+          </button>
+        </div>
+      )}
+
       {/* CABEÇALHO */}
       <div style={{ padding: "24px 20px", borderBottom: "1px solid #374151" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -162,7 +199,7 @@ export const SidebarCaixa: React.FC<SidebarCaixaProps> = ({
           borderTop: "1px solid #374151",
           background: "#111827",
         }}
-      ></div>
+      />
     </div>
   );
 };

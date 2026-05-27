@@ -8,6 +8,12 @@ import { ModalAdicionarSaida } from "../../components/ModalAdicionarSaida";
 import { ModalGerenciarCategorias } from "../../components/ModalGerenciarCategorias";
 import { ModalImportarGastos } from "../../components/ModalImportarGastos";
 import { ModalImportarVendas } from "../../components/ModalImportarVendas";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import {
+  faArrowLeft,
+  faTimes,
+  faBars,
+} from "@fortawesome/free-solid-svg-icons";
 
 interface Transaction {
   id: number;
@@ -39,10 +45,24 @@ interface Order {
   table_id: number;
 }
 
-export default function Caixa() {
+interface CaixaProps {
+  setTela?: (tela: string) => void;
+}
+
+export default function Caixa({ setTela }: CaixaProps) {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const hoje = new Date().toISOString().split("T")[0];
   const anoAtual = new Date().getFullYear();
   const mesAtual = new Date().getMonth() + 1;
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const [anoSelecionado, setAnoSelecionado] = useState(anoAtual);
   const [mesSelecionado, setMesSelecionado] = useState(mesAtual);
@@ -211,12 +231,13 @@ export default function Caixa() {
 
       setTransacoes(todasTransacoes);
 
-      const diasUnicos = [...new Set(todasTransacoes.map((t) => t.date))];
-      const novosExpandidos: { [key: string]: boolean } = {};
-      diasUnicos.forEach((data) => {
-        novosExpandidos[data] = true;
-      });
-      setDiasExpandidos((prev) => ({ ...prev, ...novosExpandidos }));
+      // REMOVA ou COMENTE esta parte que inicializa os dias como expandidos
+      // const diasUnicos = [...new Set(todasTransacoes.map((t) => t.date))];
+      // const novosExpandidos: { [key: string]: boolean } = {};
+      // diasUnicos.forEach((data) => {
+      //   novosExpandidos[data] = true;
+      // });
+      // setDiasExpandidos((prev) => ({ ...prev, ...novosExpandidos }));
     } catch (error) {
       console.error("Erro ao buscar transações:", error);
       setTransacoes([]);
@@ -793,24 +814,409 @@ export default function Caixa() {
     { value: 12, label: "Dezembro" },
   ];
 
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "280px 1fr",
-        height: "100%",
-        background: "#FAFAFA",
-      }}
-    >
-      <SidebarCaixa
-        setShowModalSaida={setShowModalSaida}
-        setShowModalGerenciar={setShowModalGerenciar}
-        setShowModalImportarGastos={setShowModalImportarGastos}
-        setShowModalImportarVendas={setShowModalImportarVendas}
-      />
+  // Versão Desktop
+  if (!isMobile) {
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "280px 1fr",
+          height: "100%",
+          background: "#FAFAFA",
+        }}
+      >
+        <SidebarCaixa
+          setShowModalSaida={setShowModalSaida}
+          setShowModalGerenciar={setShowModalGerenciar}
+          setShowModalImportarGastos={setShowModalImportarGastos}
+          setShowModalImportarVendas={setShowModalImportarVendas}
+          onVoltarDashboard={setTela ? () => setTela("dashboard") : undefined}
+        />
 
-      {/* CONTEÚDO */}
-      <div style={{ padding: "20px", overflowY: "auto", height: "100vh" }}>
+        <div style={{ padding: "20px", overflowY: "auto", height: "100vh" }}>
+          <HeaderCaixa
+            mesSelecionado={mesSelecionado}
+            setMesSelecionado={setMesSelecionado}
+            anoSelecionado={anoSelecionado}
+            setAnoSelecionado={setAnoSelecionado}
+            showEntradas={showEntradas}
+            setShowEntradas={setShowEntradas}
+            showSaidas={showSaidas}
+            setShowSaidas={setShowSaidas}
+            totalEntradas={totalEntradas}
+            totalSaidas={totalSaidas}
+            saldoGeral={saldoGeral}
+            formatCurrency={formatCurrency}
+            anos={anos}
+            meses={meses}
+          />
+
+          <FiltrosCaixa
+            categorias={categorias}
+            filtroCategoria={filtroCategoria}
+            setFiltroCategoria={setFiltroCategoria}
+          />
+
+          <TabelaGastos
+            transacoesPorData={transacoesPorData}
+            diasExpandidos={diasExpandidos}
+            totalEntradasPorData={totalEntradasPorData}
+            totalSaidasPorData={totalSaidasPorData}
+            saldoPorData={saldoPorData}
+            loading={loading}
+            formatDate={formatDate}
+            formatCurrency={formatCurrency}
+            toggleDia={toggleDia}
+            removerTransacao={removerTransacao}
+          />
+        </div>
+
+        {/* MODAIS */}
+        {showModalGerenciar && (
+          <ModalGerenciarCategorias
+            showModalGerenciar={showModalGerenciar}
+            setShowModalGerenciar={setShowModalGerenciar}
+            categorias={categorias}
+            editandoCategoria={editandoCategoria}
+            setEditandoCategoria={setEditandoCategoria}
+            transacoes={transacoes}
+            editarCategoria={editarCategoria}
+            excluirCategoria={excluirCategoria}
+            setShowModalCategoria={setShowModalCategoria}
+          />
+        )}
+
+        <ModalAdicionarCategoria
+          showModalCategoria={showModalCategoria}
+          setShowModalCategoria={setShowModalCategoria}
+          novaCategoria={novaCategoria}
+          setNovaCategoria={setNovaCategoria}
+          cores={cores}
+          adicionarCategoria={adicionarCategoria}
+        />
+
+        <ModalAdicionarSaida
+          showModalSaida={showModalSaida}
+          setShowModalSaida={setShowModalSaida}
+          novaSaida={novaSaida}
+          setNovaSaida={setNovaSaida}
+          categorias={categorias}
+          adicionarSaida={adicionarSaida}
+        />
+
+        <ModalImportarGastos
+          showModalImportarGastos={showModalImportarGastos}
+          setShowModalImportarGastos={setShowModalImportarGastos}
+          importFile={importFile}
+          setImportFile={setImportFile}
+          importPreview={importPreview}
+          importing={importing}
+          previewCSV={previewCSV}
+          importarGastosCSV={importarGastosCSV}
+        />
+
+        <ModalImportarVendas
+          showModalImportarVendas={showModalImportarVendas}
+          setShowModalImportarVendas={setShowModalImportarVendas}
+          importFile={importFile}
+          setImportFile={setImportFile}
+          importPreview={importPreview}
+          importing={importing}
+          previewCSV={previewCSV}
+          importarVendasCSV={importarVendasCSV}
+        />
+      </div>
+    );
+  }
+
+  // Versão Mobile
+  return (
+    <div style={{ background: "#f3f4f6", minHeight: "100vh" }}>
+      {/* Header Mobile */}
+      <div
+        style={{
+          padding: "16px",
+          background: "#1f2937",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              background: "#374151",
+              borderRadius: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span style={{ fontSize: 20 }}>💰</span>
+          </div>
+          <h1
+            style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "#fff" }}
+          >
+            Caixa
+          </h1>
+        </div>
+        <button
+          onClick={() => setShowMobileMenu(true)}
+          style={{
+            background: "#374151",
+            border: "none",
+            borderRadius: 8,
+            padding: "8px 12px",
+            cursor: "pointer",
+            color: "#fff",
+          }}
+        >
+          <FontAwesomeIcon icon={faBars} />
+        </button>
+      </div>
+
+      {/* Botão Voltar ao Dashboard - Mobile */}
+      <div style={{ padding: "12px 16px" }}>
+        <button
+          onClick={() => setTela && setTela("dashboard")}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            width: "100%",
+            padding: "10px 16px",
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 8,
+            cursor: "pointer",
+            color: "#374151",
+            fontSize: 14,
+          }}
+        >
+          <FontAwesomeIcon icon={faArrowLeft} />
+          Voltar ao Dashboard
+        </button>
+      </div>
+
+      {/* Menu Mobile */}
+      {showMobileMenu && (
+        <>
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0,0,0,0.5)",
+              zIndex: 1000,
+            }}
+            onClick={() => setShowMobileMenu(false)}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: "280px",
+              background: "#1f2937",
+              zIndex: 1001,
+              padding: "20px",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginBottom: 20,
+              }}
+            >
+              <button
+                onClick={() => setShowMobileMenu(false)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  color: "#fff",
+                }}
+              >
+                <FontAwesomeIcon icon={faTimes} />
+              </button>
+            </div>
+
+            <button
+              onClick={() => {
+                setShowModalSaida(true);
+                setShowMobileMenu(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                width: "100%",
+                padding: "12px 16px",
+                background: "transparent",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                color: "#fff",
+                marginBottom: 12,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#374151";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  background: "#374151",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span style={{ fontSize: 14 }}>📤</span>
+              </div>
+              <span>Nova Saída</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowModalGerenciar(true);
+                setShowMobileMenu(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                width: "100%",
+                padding: "12px 16px",
+                background: "transparent",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                color: "#fff",
+                marginBottom: 12,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#374151";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  background: "#374151",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span style={{ fontSize: 14 }}>🏷️</span>
+              </div>
+              <span>Categorias</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowModalImportarGastos(true);
+                setShowMobileMenu(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                width: "100%",
+                padding: "12px 16px",
+                background: "transparent",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                color: "#fff",
+                marginBottom: 12,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#374151";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  background: "#374151",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span style={{ fontSize: 14 }}>📥</span>
+              </div>
+              <span>Importar Gastos</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setShowModalImportarVendas(true);
+                setShowMobileMenu(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                width: "100%",
+                padding: "12px 16px",
+                background: "transparent",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                color: "#fff",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#374151";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  background: "#374151",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span style={{ fontSize: 14 }}>📤</span>
+              </div>
+              <span>Importar Vendas</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Conteúdo Mobile */}
+      <div style={{ padding: "16px" }}>
         <HeaderCaixa
           mesSelecionado={mesSelecionado}
           setMesSelecionado={setMesSelecionado}
