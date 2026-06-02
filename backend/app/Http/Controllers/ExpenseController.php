@@ -4,6 +4,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Expense;
+use App\Models\ExpenseCategory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -16,10 +17,11 @@ class ExpenseController extends Controller
                 'restaurant_id' => 'required|exists:restaurants,id',
                 'start_date' => 'nullable|date',
                 'end_date' => 'nullable|date|after_or_equal:start_date',
-                'category' => 'nullable|string', // Remove the in: constraint
+                'category_id' => 'nullable|integer',
             ]);
 
-            $query = Expense::where('restaurant_id', $request->restaurant_id);
+            $query = Expense::where('restaurant_id', $request->restaurant_id)
+                ->with('category'); // Carregar a categoria relacionada
 
             if ($request->has('start_date')) {
                 $query->whereDate('expense_date', '>=', $request->start_date);
@@ -27,8 +29,8 @@ class ExpenseController extends Controller
             if ($request->has('end_date')) {
                 $query->whereDate('expense_date', '<=', $request->end_date);
             }
-            if ($request->has('category')) {
-                $query->where('category', $request->category);
+            if ($request->has('category_id')) {
+                $query->where('category_id', $request->category_id);
             }
 
             $expenses = $query->orderBy('expense_date', 'desc')
@@ -52,16 +54,31 @@ class ExpenseController extends Controller
                 'description' => 'required|string|max:255',
                 'amount' => 'required|numeric|min:0.01',
                 'expense_date' => 'required|date',
-                'category' => 'nullable|string|max:50',
+                'category_id' => 'required|exists:expense_categories,id', // Mudado de category para category_id
                 'notes' => 'nullable|string',
             ]);
 
-            $expense = Expense::create($data);
+            $expense = Expense::create([
+                'restaurant_id' => $data['restaurant_id'],
+                'description' => $data['description'],
+                'amount' => $data['amount'],
+                'expense_date' => $data['expense_date'],
+                'category_id' => $data['category_id'], // Usando category_id
+                'notes' => $data['notes'],
+            ]);
+
+            // Carregar a categoria relacionada para retornar
+            $expense->load('category');
 
             return response()->json([
                 'message' => 'Gasto lançado com sucesso',
                 'expense' => $expense
             ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Erro de validação',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Erro ao criar gasto',
@@ -73,7 +90,7 @@ class ExpenseController extends Controller
     public function show($id)
     {
         try {
-            $expense = Expense::findOrFail($id);
+            $expense = Expense::with('category')->findOrFail($id);
             return response()->json($expense);
         } catch (\Exception $e) {
             return response()->json([
@@ -91,11 +108,12 @@ class ExpenseController extends Controller
                 'description' => 'sometimes|string|max:255',
                 'amount' => 'sometimes|numeric|min:0.01',
                 'expense_date' => 'sometimes|date',
-                'category' => 'nullable|string|max:50',
+                'category_id' => 'sometimes|exists:expense_categories,id', // Mudado de category para category_id
                 'notes' => 'nullable|string',
             ]);
 
             $expense->update($data);
+            $expense->load('category');
 
             return response()->json([
                 'message' => 'Gasto atualizado com sucesso',
@@ -140,8 +158,9 @@ class ExpenseController extends Controller
 
             $expensesByCategory = Expense::where('restaurant_id', $request->restaurant_id)
                 ->whereDate('expense_date', $request->date)
-                ->select('category', DB::raw('SUM(amount) as total'))
-                ->groupBy('category')
+                ->with('category')
+                ->select('category_id', DB::raw('SUM(amount) as total'))
+                ->groupBy('category_id')
                 ->get();
 
             return response()->json([
@@ -171,8 +190,9 @@ class ExpenseController extends Controller
 
             $expenses = Expense::where('restaurant_id', $request->restaurant_id)
                 ->whereBetween('expense_date', [$startDate, $endDate])
-                ->select('category', DB::raw('SUM(amount) as total'))
-                ->groupBy('category')
+                ->with('category')
+                ->select('category_id', DB::raw('SUM(amount) as total'))
+                ->groupBy('category_id')
                 ->get();
 
             $total = $expenses->sum('total');
@@ -186,6 +206,65 @@ class ExpenseController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Erro ao buscar resumo mensal',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function importCsv(Request $request)
+    {
+        try {
+            $request->validate([
+                'restaurant_id' => 'required|exists:restaurants,id',
+                'file' => 'required|file|mimes:csv,txt',
+                'category_id' => 'required|exists:expense_categories,id',
+            ]);
+
+            $file = $request->file('file');
+            $handle = fopen($file->getPathname(), 'r');
+
+            // Ler cabeçalho
+            $header = fgetcsv($handle, 0, ';');
+
+            $imported = 0;
+            $errors = [];
+
+            while (($row = fgetcsv($handle, 0, ';')) !== false) {
+                try {
+                    $data = array_combine($header, $row);
+
+                    // Converter data de DD/MM/YYYY para YYYY-MM-DD
+                    $dateParts = explode('/', $data['Data']);
+                    $formattedDate = "{$dateParts[2]}-{$dateParts[1]}-{$dateParts[0]}";
+
+                    // Converter valor (substituir vírgula por ponto)
+                    $amount = str_replace(',', '.', $data['Valor']);
+
+                    Expense::create([
+                        'restaurant_id' => $request->restaurant_id,
+                        'description' => $data['Descrição'],
+                        'amount' => (float) $amount,
+                        'expense_date' => $formattedDate,
+                        'category_id' => $request->category_id,
+                        'notes' => null,
+                    ]);
+
+                    $imported++;
+                } catch (\Exception $e) {
+                    $errors[] = "Erro na linha " . ($imported + 2) . ": " . $e->getMessage();
+                }
+            }
+
+            fclose($handle);
+
+            return response()->json([
+                'message' => "Importação concluída",
+                'imported' => $imported,
+                'errors' => $errors
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erro na importação',
                 'error' => $e->getMessage()
             ], 500);
         }

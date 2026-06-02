@@ -63,6 +63,7 @@ Route::prefix('expenses')->group(function () {
     Route::get('/{id}', [ExpenseController::class, 'show']);        // Mostrar gasto
     Route::put('/{id}', [ExpenseController::class, 'update']);      // Atualizar gasto
     Route::delete('/{id}', [ExpenseController::class, 'destroy']);  // Deletar gasto
+    Route::post('/import-csv', [ExpenseController::class, 'importCsv']); // Importar gasto
 });
 
 
