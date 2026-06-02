@@ -126,24 +126,38 @@ export default function Caixa({ setTela }: CaixaProps) {
       const response = await fetch(
         "http://localhost:8000/api/expense-categories?restaurant_id=1",
       );
-      if (!response.ok) throw new Error("Erro ao buscar categorias");
+
+      if (!response.ok) {
+        throw new Error("Erro ao buscar categorias");
+      }
+
       const data = await response.json();
+
+      console.log("Categorias:", data);
+
       setCategorias(data);
 
-      if (data.length > 0 && novaSaida.category_id === 0) {
-        setNovaSaida((prev) => ({ ...prev, category_id: data[0].id }));
-      }
+      setNovaSaida((prev) => ({
+        ...prev,
+        category_id:
+          prev.category_id === 0 && data.length > 0
+            ? data[0].id
+            : prev.category_id,
+      }));
     } catch (error) {
       console.error("Erro ao buscar categorias:", error);
     }
-  }, [novaSaida.category_id]);
+  }, []);
 
-  // Buscar entradas (vendas do PDV)
+  // Buscar entradas (vendas do PDV) - COM FILTRO DE DATA
   const fetchEntradas = useCallback(async () => {
     try {
+      // Datas do mês selecionado
       const startDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-01`;
       const lastDay = new Date(anoSelecionado, mesSelecionado, 0).getDate();
       const endDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-${lastDay}`;
+
+      console.log(`=== BUSCANDO VENDAS DE ${startDate} ATÉ ${endDate} ===`);
 
       const response = await fetch(
         `http://localhost:8000/api/orders?restaurant_id=1`,
@@ -152,34 +166,44 @@ export default function Caixa({ setTela }: CaixaProps) {
 
       const orders: Order[] = await response.json();
 
-      const vendasNoPeriodo = orders.filter((order) => {
+      // Filtrar apenas as fechadas E dentro do período selecionado
+      const ordensFiltradas = orders.filter((order) => {
         if (order.status !== "fechado") return false;
-        const orderDate = order.closed_at
-          ? new Date(order.closed_at).toISOString().split("T")[0]
-          : null;
+
+        const orderDate = order.closed_at.split("T")[0];
         return orderDate >= startDate && orderDate <= endDate;
       });
 
-      const entradas: Transaction[] = vendasNoPeriodo.map((order) => ({
-        id: order.id,
-        description: `Venda - ${order.customer_name || `Mesa ${order.table_id}`}`,
-        amount: Number(order.total) || 0,
-        date: order.closed_at
-          ? order.closed_at.split("T")[0]
-          : new Date().toISOString().split("T")[0],
-        category_id: 0,
-        type: "entrada",
-        category: undefined,
-        notes: `Pagamento: ${order.payment_method}`,
-        source: "pdv",
-      }));
+      console.log(`Vendas no período: ${ordensFiltradas.length}`);
 
+      const extrairData = (dataCompleta: string): string => {
+        if (!dataCompleta) return "";
+        return dataCompleta.split("T")[0].split(" ")[0];
+      };
+
+      const entradas: Transaction[] = ordensFiltradas.map((order) => {
+        const orderDate = extrairData(order.closed_at);
+
+        return {
+          id: order.id,
+          description: `Venda - ${order.customer_name || `Mesa ${order.table_id}`}`,
+          amount: Number(order.total) || 0,
+          date: orderDate,
+          category_id: 0,
+          type: "entrada",
+          category: undefined,
+          notes: `Pagamento: ${order.payment_method}`,
+          source: "pdv",
+        };
+      });
+
+      console.log("Entradas geradas:", entradas.length);
       return entradas;
     } catch (error) {
       console.error("Erro ao buscar vendas:", error);
       return [];
     }
-  }, [anoSelecionado, mesSelecionado]);
+  }, [anoSelecionado, mesSelecionado]); // Mantém as dependências
 
   // Buscar saídas (gastos)
   const fetchSaidas = useCallback(async () => {
@@ -187,6 +211,8 @@ export default function Caixa({ setTela }: CaixaProps) {
       const startDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-01`;
       const lastDay = new Date(anoSelecionado, mesSelecionado, 0).getDate();
       const endDate = `${anoSelecionado}-${String(mesSelecionado).padStart(2, "0")}-${lastDay}`;
+
+      console.log(`=== BUSCANDO GASTOS DE ${startDate} ATÉ ${endDate} ===`);
 
       const url = `http://localhost:8000/api/expenses?restaurant_id=1&start_date=${startDate}&end_date=${endDate}`;
       const response = await fetch(url);
@@ -210,53 +236,66 @@ export default function Caixa({ setTela }: CaixaProps) {
         };
       });
 
+      console.log(`Gastos no período: ${saidas.length}`);
       return saidas;
     } catch (error) {
       console.error("Erro ao buscar saídas:", error);
       return [];
     }
-  }, [anoSelecionado, mesSelecionado, categorias]);
+  }, [anoSelecionado, mesSelecionado, categorias]); // Adicione categorias como dependência
 
   // Buscar todas as transações
   const fetchTransacoes = useCallback(async () => {
     setLoading(true);
+
     try {
+      console.log("========== INICIANDO BUSCA ==========");
+
       const [entradas, saidas] = await Promise.all([
         fetchEntradas(),
         fetchSaidas(),
       ]);
 
+      console.log("Entradas recebidas:", entradas);
+      console.log("Saídas recebidas:", saidas);
+
+      console.log("Quantidade de entradas:", entradas.length);
+      console.log("Quantidade de saídas:", saidas.length);
+
       const todasTransacoes = [...entradas, ...saidas];
-      todasTransacoes.sort((a, b) => b.date.localeCompare(a.date));
+
+      console.log("Todas as transações antes do sort:");
+      console.table(todasTransacoes);
+
+      todasTransacoes.sort((a, b) =>
+        String(b.date).localeCompare(String(a.date)),
+      );
+
+      console.log("Todas as transações após o sort:");
+      console.table(todasTransacoes);
 
       setTransacoes(todasTransacoes);
 
-      // REMOVA ou COMENTE esta parte que inicializa os dias como expandidos
-      // const diasUnicos = [...new Set(todasTransacoes.map((t) => t.date))];
-      // const novosExpandidos: { [key: string]: boolean } = {};
-      // diasUnicos.forEach((data) => {
-      //   novosExpandidos[data] = true;
-      // });
-      // setDiasExpandidos((prev) => ({ ...prev, ...novosExpandidos }));
+      console.log("setTransacoes executado com sucesso");
     } catch (error) {
       console.error("Erro ao buscar transações:", error);
       setTransacoes([]);
     } finally {
       setLoading(false);
+      console.log("========== FIM DA BUSCA ==========");
     }
   }, [fetchEntradas, fetchSaidas]);
 
+  // Efeito para carregar categorias uma vez
   // Efeito para carregar categorias uma vez
   useEffect(() => {
     fetchCategorias();
   }, [fetchCategorias]);
 
-  // Efeito para carregar transações quando categorias, ano ou mês mudarem
+  // Efeito para carregar transações
   useEffect(() => {
-    if (categorias.length > 0) {
-      fetchTransacoes();
-    }
-  }, [anoSelecionado, mesSelecionado, categorias, fetchTransacoes]);
+    fetchTransacoes();
+  }, [fetchTransacoes]);
 
   // Adicionar categoria
   const adicionarCategoria = async () => {
@@ -296,63 +335,122 @@ export default function Caixa({ setTela }: CaixaProps) {
   };
 
   // Processar arquivo CSV
+  // Processar arquivo CSV com detecção automática de delimitador
   const processCSV = (file: File, callback: (data: any[]) => void) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      const lines = text.split("\n");
+      const lines = text.split("\n").filter((line) => line.trim());
 
-      const firstLine = lines[0].toLowerCase();
+      if (lines.length === 0) {
+        callback([]);
+        return;
+      }
+
+      // DETECTAR DELIMITADOR (; ou ,)
+      const firstLine = lines[0];
+      let delimiter = ",";
+
+      // Contar ocorrências de ; e ,
+      const commaCount = (firstLine.match(/,/g) || []).length;
+      const semicolonCount = (firstLine.match(/;/g) || []).length;
+
+      // Se ponto e vírgula for mais comum, usar ele
+      if (semicolonCount > commaCount) {
+        delimiter = ";";
+      }
+
+      // Verificar se é um cabeçalho válido (contém palavras-chave)
+      const firstLineLower = firstLine.toLowerCase();
       const hasHeader =
-        firstLine.includes("descricao") ||
-        firstLine.includes("description") ||
-        firstLine.includes("data") ||
-        firstLine.includes("valor") ||
-        firstLine.includes("cliente");
+        firstLineLower.includes("descricao") ||
+        firstLineLower.includes("description") ||
+        firstLineLower.includes("data") ||
+        firstLineLower.includes("valor") ||
+        firstLineLower.includes("cliente") ||
+        firstLineLower.includes("categoria");
 
       let headers: string[] = [];
       let startRow = 0;
 
-      if (hasHeader) {
-        headers = lines[0].split(",").map((h) => h.trim().replace(/"/g, ""));
-        startRow = 1;
-      } else {
-        headers = ["data", "descricao", "valor"];
-        startRow = 0;
-      }
-
-      const data = [];
-      for (let i = startRow; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-
-        const values: string[] = [];
+      // Função para parsear linha respeitando aspas
+      const parseRow = (line: string): string[] => {
+        const result: string[] = [];
         let inQuotes = false;
         let currentValue = "";
 
-        for (let j = 0; j < lines[i].length; j++) {
-          const char = lines[i][j];
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+
           if (char === '"') {
             inQuotes = !inQuotes;
-          } else if (char === "," && !inQuotes) {
-            values.push(currentValue.trim());
+          } else if (char === delimiter && !inQuotes) {
+            result.push(currentValue.trim());
             currentValue = "";
           } else {
             currentValue += char;
           }
         }
-        values.push(currentValue.trim());
+        result.push(currentValue.trim());
 
+        // Remover aspas extras do início e fim
+        return result.map((v) => v.replace(/^"|"$/g, "").replace(/""/g, '"'));
+      };
+
+      if (hasHeader) {
+        headers = parseRow(lines[0]);
+        startRow = 1;
+      } else {
+        // Se não tem cabeçalho, criar padrão
+        const firstRowData = parseRow(lines[0]);
+        if (firstRowData.length === 3) {
+          headers = ["data", "descricao", "valor"];
+        } else if (firstRowData.length === 4) {
+          headers = ["data", "descricao", "valor", "categoria"];
+        } else {
+          headers = ["data", "descricao", "valor"];
+        }
+        startRow = 0;
+      }
+
+      // Mapear índices para os nomes esperados (case insensitive)
+      const dataIndex = headers.findIndex(
+        (h) => h.toLowerCase() === "data" || h.toLowerCase() === "date",
+      );
+      const descIndex = headers.findIndex(
+        (h) =>
+          h.toLowerCase() === "descricao" || h.toLowerCase() === "description",
+      );
+      const valorIndex = headers.findIndex(
+        (h) =>
+          h.toLowerCase() === "valor" ||
+          h.toLowerCase() === "amount" ||
+          h.toLowerCase() === "total",
+      );
+      const categoriaIndex = headers.findIndex(
+        (h) =>
+          h.toLowerCase() === "categoria" || h.toLowerCase() === "category",
+      );
+
+      const data: any[] = [];
+
+      for (let i = startRow; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+
+        const values = parseRow(lines[i]);
         const row: any = {};
-        headers.forEach((header, index) => {
-          if (index < values.length) {
-            row[header] = values[index];
-          }
-        });
 
-        if (!hasHeader && Object.keys(row).length === 3) {
+        if (dataIndex !== -1) row.data = values[dataIndex] || "";
+        if (descIndex !== -1) row.descricao = values[descIndex] || "";
+        if (valorIndex !== -1) row.valor = values[valorIndex] || "";
+        if (categoriaIndex !== -1) row.categoria = values[categoriaIndex] || "";
+
+        // Se não encontrou pelos headers, tenta por posição
+        if (Object.keys(row).length === 0 && values.length >= 3) {
           row.data = values[0];
           row.descricao = values[1];
           row.valor = values[2];
+          if (values.length >= 4) row.categoria = values[3];
         }
 
         data.push(row);
@@ -391,7 +489,6 @@ export default function Caixa({ setTela }: CaixaProps) {
     return cleanDate;
   };
 
-  // Importar gastos do CSV
   const importarGastosCSV = async () => {
     if (!importFile) {
       alert("Selecione um arquivo CSV");
@@ -399,47 +496,69 @@ export default function Caixa({ setTela }: CaixaProps) {
     }
 
     setImporting(true);
-    processCSV(importFile, async (data) => {
+
+    const reader = new FileReader();
+
+    reader.onload = async (event) => {
+      const conteudo = event.target?.result as string;
+      const linhas = conteudo.split(/\r?\n/);
+
       let sucesso = 0;
       let erros = 0;
 
-      for (const row of data) {
+      // Começa da linha 1 (pula o cabeçalho)
+      for (let i = 1; i < linhas.length; i++) {
+        const linha = linhas[i];
+
+        if (!linha.trim()) continue;
+
+        // Divide a linha por ponto e vírgula
+        const partes = linha.split(";");
+
+        if (partes.length < 3) {
+          erros++;
+          continue;
+        }
+
+        const data = partes[0]?.trim();
+        const descricao = partes[1]?.trim();
+        let valor = partes[2]?.trim();
+        const categoriaId = partes[3]?.trim() || "2";
+
+        if (!data || !descricao || !valor) {
+          erros++;
+          continue;
+        }
+
+        // Limpa o valor (remove R$ e converte vírgula para ponto)
+        valor = valor.replace("R$", "").replace(",", ".").trim();
+        const valorNumerico = parseFloat(valor);
+
+        if (isNaN(valorNumerico)) {
+          erros++;
+          continue;
+        }
+
+        // Converte a data se necessário
+        let dataFormatada = data;
+        if (data.includes("/")) {
+          const [dia, mes, ano] = data.split("/");
+          dataFormatada = `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+        }
+
         try {
-          const description = row.descricao || row.description || row.Descricao;
-          const amount = parseFloat(row.valor || row.amount || row.Valor);
-          let dateStr = row.data || row.date || row.Data;
-          const categoryName = row.categoria || row.category || row.Categoria;
-
-          if (!description || isNaN(amount) || !dateStr) {
-            erros++;
-            continue;
-          }
-
-          const date = parseBrazilianDate(dateStr);
-
-          if (!date) {
-            erros++;
-            continue;
-          }
-
-          const categoria = categorias.find(
-            (c) => c.name.toLowerCase() === categoryName?.toLowerCase(),
-          );
-
           const response = await fetch("http://localhost:8000/api/expenses", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Accept: "application/json",
             },
             body: JSON.stringify({
               restaurant_id: 1,
-              description: description,
-              amount: amount,
-              expense_date: date,
-              category_id: categoria?.id || categorias[0]?.id || 1,
-              type: "saida",
-              notes: `Importado via CSV em ${new Date().toLocaleString()}. Original: ${dateStr}`,
+              description: descricao,
+              amount: valorNumerico,
+              expense_date: dataFormatada,
+              category_id: parseInt(categoriaId),
+              notes: "Importado via CSV",
             }),
           });
 
@@ -454,17 +573,19 @@ export default function Caixa({ setTela }: CaixaProps) {
       }
 
       alert(
-        `Importação concluída!\n✅ Sucesso: ${sucesso}\n❌ Erros: ${erros}`,
+        `Importação finalizada!\n✅ Sucesso: ${sucesso}\n❌ Erros: ${erros}`,
       );
+
       setShowModalImportarGastos(false);
       setImportFile(null);
       setImportPreview([]);
       fetchTransacoes();
       setImporting(false);
-    });
+    };
+
+    reader.readAsText(importFile, "UTF-8");
   };
 
-  // Importar vendas do CSV
   const importarVendasCSV = async () => {
     if (!importFile) {
       alert("Selecione um arquivo CSV");
@@ -472,81 +593,231 @@ export default function Caixa({ setTela }: CaixaProps) {
     }
 
     setImporting(true);
-    processCSV(importFile, async (data) => {
+
+    const reader = new FileReader();
+
+    reader.onload = async (event) => {
+      const conteudo = event.target?.result as string;
+      const linhas = conteudo.split(/\r?\n/).filter((linha) => linha.trim());
+
+      if (linhas.length < 2) {
+        alert("Arquivo vazio ou formato inválido");
+        setImporting(false);
+        return;
+      }
+
+      // Lê o cabeçalho
+      const cabecalho = linhas[0]
+        .split(";")
+        .map((col) => col.trim().toLowerCase());
+
+      // Mapeia os índices
+      let idxData = cabecalho.findIndex((h) => h === "data" || h === "date");
+      let idxCliente = cabecalho.findIndex(
+        (h) => h === "cliente" || h === "customer" || h === "customer_name",
+      );
+      let idxValor = cabecalho.findIndex(
+        (h) => h === "valor" || h === "amount" || h === "total",
+      );
+      let idxPagamento = cabecalho.findIndex(
+        (h) => h === "pagamento" || h === "payment" || h === "payment_method",
+      );
+
+      // Valores padrão
+      if (idxData === -1) idxData = 0;
+      if (idxValor === -1) idxValor = 1;
+
       let sucesso = 0;
       let erros = 0;
 
-      for (const row of data) {
+      for (let i = 1; i < linhas.length; i++) {
+        const linha = linhas[i];
+        if (!linha.trim()) continue;
+
+        const partes = linha.split(";").map((col) => col.trim());
+
+        if (partes.length < 2) {
+          erros++;
+          continue;
+        }
+
+        const dataOriginal = partes[idxData] || "";
+        const cliente =
+          idxCliente !== -1
+            ? partes[idxCliente] || "Venda Rápida"
+            : "Venda Rápida";
+        let valorRaw = partes[idxValor] || "";
+        const pagamento =
+          idxPagamento !== -1 ? partes[idxPagamento] || "dinheiro" : "dinheiro";
+
+        if (!dataOriginal || !valorRaw) {
+          erros++;
+          continue;
+        }
+
+        // ========== CORREÇÃO DA CONVERSÃO DO VALOR ==========
+        let valorNumerico = 0;
+
+        // Remove R$ e espaços
+        let valorLimpo = valorRaw.replace(/R\$\s*/g, "").trim();
+
+        // Verifica se tem vírgula (formato brasileiro: 269,71)
+        if (valorLimpo.includes(",")) {
+          // Remove pontos de milhar (ex: 1.269,71 -> 1269,71)
+          valorLimpo = valorLimpo.replace(/\./g, "");
+          // Troca vírgula por ponto
+          valorLimpo = valorLimpo.replace(",", ".");
+        }
+
+        valorNumerico = parseFloat(valorLimpo);
+
+        console.log(
+          `Valor: "${valorRaw}" -> "${valorLimpo}" -> ${valorNumerico}`,
+        );
+
+        if (isNaN(valorNumerico) || valorNumerico <= 0) {
+          console.error(`Valor inválido: ${valorRaw}`);
+          erros++;
+          continue;
+        }
+
+        // Converte a data para YYYY-MM-DD
+        let dataFormatada = dataOriginal;
+        if (dataOriginal.includes("/")) {
+          const [dia, mes, ano] = dataOriginal.split("/");
+          dataFormatada = `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+        }
+
         try {
-          const customerName =
-            row.cliente || row.customer_name || row.Cliente || "Cliente CSV";
-          const amount = parseFloat(
-            row.valor || row.total || row.Valor || row.Total,
-          );
-          let dateStr = row.data || row.date || row.Data;
-          const paymentMethod =
-            row.pagamento || row.payment_method || row.Pagamento || "dinheiro";
-
-          if (isNaN(amount) || !dateStr) {
-            erros++;
-            continue;
-          }
-
-          const date = parseBrazilianDate(dateStr);
-
-          if (!date) {
-            erros++;
-            continue;
-          }
-
           const response = await fetch("http://localhost:8000/api/orders", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Accept: "application/json",
             },
             body: JSON.stringify({
               restaurant_id: 1,
               table_id: 1,
-              customer_name: customerName,
+              customer_name: cliente,
               status: "fechado",
-              total: amount,
-              payment_method: paymentMethod,
-              closed_at: date,
+              total: valorNumerico,
+              payment_method: pagamento.toLowerCase(),
+              closed_at: dataFormatada,
             }),
           });
 
           if (response.ok) {
             sucesso++;
           } else {
+            const errorData = await response.json();
+            console.error(`Erro API:`, errorData);
             erros++;
           }
         } catch (error) {
+          console.error(`Erro:`, error);
           erros++;
         }
       }
 
       alert(
-        `Importação concluída!\n✅ Sucesso: ${sucesso}\n❌ Erros: ${erros}`,
+        `Importação de vendas finalizada!\n✅ Sucesso: ${sucesso}\n❌ Erros: ${erros}`,
       );
+
       setShowModalImportarVendas(false);
       setImportFile(null);
       setImportPreview([]);
       fetchTransacoes();
       setImporting(false);
-    });
+    };
+
+    reader.readAsText(importFile, "UTF-8");
   };
 
-  // Visualizar preview do CSV
   const previewCSV = (file: File) => {
-    processCSV(file, (data) => {
-      const formattedData = data.slice(0, 5).map((row) => ({
-        ...row,
-        data_original: row.data || row.date || row.Data,
-        data_convertida: parseBrazilianDate(row.data || row.date || row.Data),
-      }));
-      setImportPreview(formattedData);
-    });
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const conteudo = event.target?.result as string;
+      const linhas = conteudo.split(/\r?\n/);
+
+      const preview = [];
+
+      for (let i = 1; i < linhas.length && i < 6; i++) {
+        const linha = linhas[i];
+        if (!linha.trim()) continue;
+
+        const partes = linha.split(";");
+
+        preview.push({
+          data_original: partes[0]?.trim() || "",
+          descricao: partes[1]?.trim() || "",
+          valor: partes[2]?.trim() || "",
+          categoria: partes[3]?.trim() || "",
+        });
+      }
+
+      setImportPreview(preview);
+    };
+
+    reader.readAsText(file, "UTF-8");
+  };
+
+  const previewVendasCSV = (file: File) => {
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const conteudo = event.target?.result as string;
+      const linhas = conteudo.split(/\r?\n/).filter((linha) => linha.trim());
+
+      if (linhas.length === 0) return;
+
+      // Lê o cabeçalho (primeira linha)
+      const cabecalho = linhas[0]
+        .split(";")
+        .map((col) => col.trim().toLowerCase());
+      console.log("Cabeçalho detectado:", cabecalho);
+
+      // Mapeia os índices das colunas
+      let idxData = cabecalho.findIndex((h) => h === "data" || h === "date");
+      let idxCliente = cabecalho.findIndex(
+        (h) => h === "cliente" || h === "customer" || h === "customer_name",
+      );
+      let idxValor = cabecalho.findIndex(
+        (h) => h === "valor" || h === "amount" || h === "total",
+      );
+      let idxPagamento = cabecalho.findIndex(
+        (h) => h === "pagamento" || h === "payment" || h === "payment_method",
+      );
+
+      // Se não encontrou, tenta por posição padrão
+      if (idxData === -1) idxData = 0;
+      if (idxValor === -1) idxValor = 1;
+
+      const preview = [];
+
+      // Lê as próximas 5 linhas
+      for (let i = 1; i < Math.min(linhas.length, 6); i++) {
+        const linha = linhas[i];
+        if (!linha.trim()) continue;
+
+        const partes = linha.split(";").map((col) => col.trim());
+
+        preview.push({
+          data_original: partes[idxData] || "",
+          cliente:
+            idxCliente !== -1
+              ? partes[idxCliente] || "Venda Rápida"
+              : "Venda Rápida",
+          valor: partes[idxValor] || "",
+          pagamento:
+            idxPagamento !== -1 ? partes[idxPagamento] || "debito" : "debito",
+        });
+      }
+
+      console.log("Preview vendas:", preview);
+      setImportPreview(preview);
+    };
+
+    reader.readAsText(file, "UTF-8");
   };
 
   const editarCategoria = async () => {
@@ -635,13 +906,23 @@ export default function Caixa({ setTela }: CaixaProps) {
   };
 
   const adicionarSaida = async () => {
-    if (!novaSaida.descricao || novaSaida.valor <= 0) {
-      alert("Preencha a descrição e o valor");
+    if (!novaSaida.descricao || novaSaida.descricao.trim() === "") {
+      alert("Preencha a descrição");
       return;
     }
 
-    if (!novaSaida.category_id) {
+    if (novaSaida.valor <= 0) {
+      alert("Digite um valor válido maior que zero");
+      return;
+    }
+
+    if (!novaSaida.category_id || novaSaida.category_id === 0) {
       alert("Selecione uma categoria");
+      return;
+    }
+
+    if (!novaSaida.data) {
+      alert("Selecione uma data");
       return;
     }
 
@@ -657,15 +938,21 @@ export default function Caixa({ setTela }: CaixaProps) {
           description: novaSaida.descricao,
           amount: Number(novaSaida.valor),
           expense_date: novaSaida.data,
-          category_id: novaSaida.category_id,
+          category_id: Number(novaSaida.category_id),
           type: "saida",
           notes: null,
         }),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        alert(error.message || "Erro ao adicionar saída");
+        let errorMessage = "Erro ao adicionar saída";
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+        } catch (e) {
+          errorMessage = `Erro ${response.status}: ${response.statusText}`;
+        }
+        alert(errorMessage);
         return;
       }
 
@@ -724,7 +1011,7 @@ export default function Caixa({ setTela }: CaixaProps) {
 
   const formatCurrency = (value: any): string => {
     const num = typeof value === "number" ? value : Number(value) || 0;
-    return `R$ ${num.toFixed(2)}`;
+    return `R$ ${num.toFixed(2).replace(".", ",")}`;
   };
 
   const formatDate = (dateString: string): string => {
@@ -1305,7 +1592,7 @@ export default function Caixa({ setTela }: CaixaProps) {
         setImportFile={setImportFile}
         importPreview={importPreview}
         importing={importing}
-        previewCSV={previewCSV}
+        previewCSV={previewVendasCSV} // <-- Use previewVendasCSV, não a genérica
         importarVendasCSV={importarVendasCSV}
       />
     </div>

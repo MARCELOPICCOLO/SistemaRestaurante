@@ -1,4 +1,6 @@
 import React from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faTrash, faEdit } from "@fortawesome/free-solid-svg-icons";
 
 interface Transaction {
   id: number;
@@ -27,6 +29,7 @@ interface TabelaGastosProps {
   formatCurrency: (value: any) => string;
   toggleDia: (data: string) => void;
   removerTransacao: (id: number, type: string, source?: string) => void;
+  editarTransacao?: (transacao: Transaction) => void;
 }
 
 export const TabelaGastos: React.FC<TabelaGastosProps> = ({
@@ -40,6 +43,7 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
   formatCurrency,
   toggleDia,
   removerTransacao,
+  editarTransacao,
 }) => {
   if (loading) {
     return (
@@ -55,21 +59,22 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
           padding: "40px",
           background: "#fff",
           borderRadius: 8,
+          border: "1px solid #e5e7eb",
         }}
       >
         <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
-        <p>Nenhuma transação registrada neste mês</p>
+        <p style={{ fontSize: 14, color: "#6b7280" }}>
+          Nenhuma transação registrada neste mês
+        </p>
       </div>
     );
   }
 
   return (
-    <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {Object.keys(transacoesPorData)
         .sort((a, b) => b.localeCompare(a))
         .map((data) => {
-          // TODAS AS DATAS COMEÇAM MINIMIZADAS (FECHADAS)
-          // Se o estado não existir, assume false (fechado)
           const estaExpandido = diasExpandidos[data] === true;
           const transacoesDoDia = transacoesPorData[data];
           const totalEntradasDia = totalEntradasPorData[data] || 0;
@@ -77,54 +82,84 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
           const saldoDia = saldoPorData[data] || 0;
 
           return (
-            <div key={data} style={{ marginBottom: 12 }}>
+            <div
+              key={data}
+              style={{
+                background: "#fff",
+                borderRadius: 12,
+                border: "1px solid #e5e7eb",
+                overflow: "hidden",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+              }}
+            >
               {/* CABEÇALHO DO DIA */}
               <div
                 onClick={() => toggleDia(data)}
                 style={{
-                  background: estaExpandido ? "#f3f4f6" : "#fff",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #e5e7eb",
+                  background: estaExpandido ? "#f9fafb" : "#fff",
+                  padding: "14px 20px",
                   cursor: "pointer",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
                   flexWrap: "wrap",
-                  gap: 8,
+                  gap: 12,
+                  borderBottom: estaExpandido ? "1px solid #e5e7eb" : "none",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 14, color: "#6b7280" }}>
                     {estaExpandido ? "▼" : "▶"}
                   </span>
-                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      color: "#1f2937",
+                    }}
+                  >
                     📅 {formatDate(data)}
                   </h3>
-                  <span style={{ fontSize: 10, color: "#6b7280" }}>
-                    ({transacoesDoDia.length}{" "}
-                    {transacoesDoDia.length === 1 ? "item" : "itens"})
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: "#6b7280",
+                      background: "#f3f4f6",
+                      padding: "2px 8px",
+                      borderRadius: 12,
+                    }}
+                  >
+                    {transacoesDoDia.length}{" "}
+                    {transacoesDoDia.length === 1 ? "item" : "itens"}
                   </span>
                 </div>
                 <div
                   style={{
                     display: "flex",
-                    gap: 12,
+                    gap: 16,
                     alignItems: "center",
                     flexWrap: "wrap",
                   }}
                 >
-                  <span style={{ fontSize: 10, color: "#10b981" }}>
+                  <span
+                    style={{ fontSize: 12, fontWeight: 500, color: "#10b981" }}
+                  >
                     Entradas: {formatCurrency(totalEntradasDia)}
                   </span>
-                  <span style={{ fontSize: 10, color: "#dc2626" }}>
+                  <span
+                    style={{ fontSize: 12, fontWeight: 500, color: "#dc2626" }}
+                  >
                     Saídas: {formatCurrency(totalSaidasDia)}
                   </span>
                   <span
                     style={{
-                      fontSize: 11,
+                      fontSize: 13,
                       fontWeight: 600,
-                      color: saldoDia >= 0 ? "#10b981" : "#dc2626",
+                      padding: "4px 8px",
+                      borderRadius: 6,
+                      background: saldoDia >= 0 ? "#f0fdf4" : "#fee2e2",
+                      color: saldoDia >= 0 ? "#059669" : "#dc2626",
                     }}
                   >
                     Saldo: {formatCurrency(saldoDia)}
@@ -132,71 +167,74 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
                 </div>
               </div>
 
-              {/* TABELA DO DIA - EXPANSÍVEL (SÓ MOSTRA SE ESTIVER EXPANDIDO) */}
+              {/* TABELA DO DIA */}
               {estaExpandido && (
-                <div style={{ marginTop: 6, overflowX: "auto" }}>
+                <div style={{ overflowX: "auto" }}>
                   <table
                     style={{
                       width: "100%",
-                      background: "#fff",
-                      borderRadius: 8,
                       borderCollapse: "collapse",
-                      fontSize: 12,
+                      fontSize: 13,
                     }}
                   >
                     <thead>
                       <tr
                         style={{
                           background: "#f9fafb",
-                          borderBottom: "1px solid #e5e7eb",
+                          borderBottom: "2px solid #e5e7eb",
                         }}
                       >
                         <th
                           style={{
-                            padding: "6px 10px",
+                            padding: "12px 16px",
                             textAlign: "left",
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 600,
+                            color: "#374151",
                           }}
                         >
                           Descrição
                         </th>
                         <th
                           style={{
-                            padding: "6px 10px",
+                            padding: "12px 16px",
                             textAlign: "left",
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 600,
+                            color: "#374151",
                           }}
                         >
                           Categoria
                         </th>
                         <th
                           style={{
-                            padding: "6px 10px",
+                            padding: "12px 16px",
                             textAlign: "left",
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 600,
+                            color: "#374151",
                           }}
                         >
                           Tipo
                         </th>
                         <th
                           style={{
-                            padding: "6px 10px",
+                            padding: "12px 16px",
                             textAlign: "right",
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 600,
+                            color: "#374151",
                           }}
                         >
                           Valor
                         </th>
                         <th
                           style={{
-                            padding: "6px 10px",
+                            padding: "12px 16px",
                             textAlign: "center",
-                            fontSize: 10,
+                            fontSize: 12,
                             fontWeight: 600,
+                            color: "#374151",
                           }}
                         >
                           Ações
@@ -204,27 +242,39 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {transacoesDoDia.map((t: Transaction) => (
+                      {transacoesDoDia.map((t: Transaction, index: number) => (
                         <tr
                           key={`${t.type}-${t.id}`}
-                          style={{ borderBottom: "1px solid #f0f0f0" }}
+                          style={{
+                            borderBottom:
+                              index < transacoesDoDia.length - 1
+                                ? "1px solid #e5e7eb"
+                                : "none",
+                            backgroundColor:
+                              index % 2 === 0 ? "#fff" : "#fafafa",
+                          }}
                         >
                           <td
-                            style={{ padding: "6px 10px", fontSize: 11 }}
+                            style={{
+                              padding: "12px 16px",
+                              fontSize: 13,
+                              color: "#1f2937",
+                            }}
                             title={t.description}
                           >
-                            {t.description.length > 35
-                              ? t.description.substring(0, 35) + "..."
+                            {t.description.length > 50
+                              ? t.description.substring(0, 50) + "..."
                               : t.description}
                           </td>
-                          <td style={{ padding: "6px 10px" }}>
+                          <td style={{ padding: "12px 16px" }}>
                             {t.type === "entrada" ? (
                               <span
                                 style={{
                                   display: "inline-block",
-                                  padding: "2px 6px",
-                                  borderRadius: 12,
-                                  fontSize: 9,
+                                  padding: "4px 12px",
+                                  borderRadius: 20,
+                                  fontSize: 11,
+                                  fontWeight: 500,
                                   background: "#d1fae5",
                                   color: "#059669",
                                 }}
@@ -235,9 +285,10 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
                               <span
                                 style={{
                                   display: "inline-block",
-                                  padding: "2px 6px",
-                                  borderRadius: 12,
-                                  fontSize: 9,
+                                  padding: "4px 12px",
+                                  borderRadius: 20,
+                                  fontSize: 11,
+                                  fontWeight: 500,
                                   background: `${t.category.color}15`,
                                   color: t.category.color,
                                 }}
@@ -245,19 +296,25 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
                                 {t.category.name}
                               </span>
                             ) : (
-                              <span style={{ fontSize: 10, color: "#9ca3af" }}>
+                              <span style={{ fontSize: 12, color: "#9ca3af" }}>
                                 Sem categoria
                               </span>
                             )}
                           </td>
-                          <td style={{ padding: "6px 10px", fontSize: 11 }}>
+                          <td
+                            style={{
+                              padding: "12px 16px",
+                              fontSize: 13,
+                              color: "#6b7280",
+                            }}
+                          >
                             {t.type === "entrada" ? "Entrada" : "Saída"}
                           </td>
                           <td
                             style={{
-                              padding: "6px 10px",
+                              padding: "12px 16px",
                               textAlign: "right",
-                              fontSize: 11,
+                              fontSize: 14,
                               fontWeight: 600,
                               color:
                                 t.type === "entrada" ? "#10b981" : "#dc2626",
@@ -267,32 +324,78 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
                           </td>
                           <td
                             style={{
-                              padding: "6px 10px",
+                              padding: "12px 16px",
                               textAlign: "center",
                             }}
                           >
-                            {t.type === "saida" && (
-                              <button
-                                onClick={() =>
-                                  removerTransacao(t.id, t.type, t.source)
-                                }
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  fontSize: 14,
-                                  cursor: "pointer",
-                                  color: "#dc2626",
-                                }}
-                                title="Remover"
-                              >
-                                🗑️
-                              </button>
-                            )}
-                            {t.type === "entrada" && (
-                              <span style={{ fontSize: 10, color: "#9ca3af" }}>
-                                PDV
-                              </span>
-                            )}
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                justifyContent: "center",
+                                alignItems: "center",
+                              }}
+                            >
+                              {t.type === "saida" && editarTransacao && (
+                                <button
+                                  onClick={() => editarTransacao(t)}
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    color: "#9ca3af",
+                                    fontSize: 16,
+                                    transition: "all 0.2s",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.color = "#10b981";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = "#9ca3af";
+                                  }}
+                                  title="Editar"
+                                >
+                                  <FontAwesomeIcon icon={faEdit} />
+                                </button>
+                              )}
+                              {t.type === "saida" && (
+                                <button
+                                  onClick={() =>
+                                    removerTransacao(t.id, t.type, t.source)
+                                  }
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    color: "#9ca3af",
+                                    fontSize: 16,
+                                    transition: "all 0.2s",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.color = "#dc2626";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = "#9ca3af";
+                                  }}
+                                  title="Remover"
+                                >
+                                  <FontAwesomeIcon icon={faTrash} />
+                                </button>
+                              )}
+                              {t.type === "entrada" && (
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    color: "#9ca3af",
+                                    background: "#f3f4f6",
+                                    padding: "4px 8px",
+                                    borderRadius: 12,
+                                  }}
+                                >
+                                  PDV
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -303,6 +406,6 @@ export const TabelaGastos: React.FC<TabelaGastosProps> = ({
             </div>
           );
         })}
-    </>
+    </div>
   );
 };

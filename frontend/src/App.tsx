@@ -5,7 +5,7 @@ import Caixa from "./pages/Caixa";
 import Relatorio from "./pages/Relatorio";
 import Dashboard from "./pages/Dashboard";
 import GestaoPontosVenda from "./pages/GestaoPontosVenda";
-import Vendas from "./pages/GestaoVendas";
+import GestaoVendas from "./pages/GestaoVendas";
 
 // import Estoque from "./pages/Estoque"; // Remova se não existir
 // import Comandas from "./pages/Comandas";
@@ -22,7 +22,7 @@ export default function App() {
       {tela === "produtos" && <Produtos setTela={setTela} />}
       {tela === "caixa" && <Caixa setTela={setTela} />}
       {tela === "relatorio" && <Relatorio />}
-      {tela === "vendas" && <Vendas setTela={setTela} />}
+      {tela === "vendas" && <GestaoVendas setTela={setTela} />}
       {/* {tela === "equipe" && <Equipe />} */}
       {/* {tela === "estoque" && <Estoque setTela={setTela} />} */}
     </div>

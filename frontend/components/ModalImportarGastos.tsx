@@ -23,6 +23,38 @@ export const ModalImportarGastos: React.FC<ModalImportarGastosProps> = ({
 }) => {
   if (!showModalImportarGastos) return null;
 
+  // Função auxiliar para pegar o valor do campo independente do nome/case
+  const getFieldValue = (row: any, fieldNames: string[]): string => {
+    for (const name of fieldNames) {
+      if (row[name] !== undefined && row[name] !== null && row[name] !== "") {
+        return String(row[name]);
+      }
+      // Busca case insensitive
+      const key = Object.keys(row).find(
+        (k) => k.toLowerCase() === name.toLowerCase(),
+      );
+      if (
+        key &&
+        row[key] !== undefined &&
+        row[key] !== null &&
+        row[key] !== ""
+      ) {
+        return String(row[key]);
+      }
+    }
+    return "N/A";
+  };
+
+  const formatPreviewDate = (dateStr: string): string => {
+    if (!dateStr || dateStr === "N/A") return "N/A";
+    // Se já estiver no formato ISO (YYYY-MM-DD)
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = dateStr.split("-");
+      return `${day}/${month}/${year}`;
+    }
+    return dateStr;
+  };
+
   return (
     <div
       style={{
@@ -45,7 +77,7 @@ export const ModalImportarGastos: React.FC<ModalImportarGastosProps> = ({
           borderRadius: 12,
           padding: 24,
           width: "90%",
-          maxWidth: 650,
+          maxWidth: 750,
           maxHeight: "80vh",
           overflowY: "auto",
         }}
@@ -67,12 +99,16 @@ export const ModalImportarGastos: React.FC<ModalImportarGastosProps> = ({
             📋 Formato esperado:
           </p>
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>
-            descricao,valor,data,categoria
+            <strong>Delimitador:</strong> ponto e vírgula (;) <br />
+            <strong>Colunas:</strong> Data;Descrição;Valor;Categoria
             <br />
-            Compra de carne,250.00,05/01/2026,carnes
+            Exemplo: 03/01/2026;AÇUCAR;13.99;2
           </p>
           <p style={{ margin: "8px 0 0", fontSize: 11, color: "#10b981" }}>
-            ✅ Datas no formato DD/MM/AAAA são convertidas automaticamente
+            ✅ Datas nos formatos DD/MM/AAAA ou AAAA-MM-DD são aceitas
+          </p>
+          <p style={{ margin: "4px 0 0", fontSize: 11, color: "#f59e0b" }}>
+            💡 Categoria deve ser o ID numérico (ex: 2) ou o nome exato
           </p>
         </div>
 
@@ -109,7 +145,7 @@ export const ModalImportarGastos: React.FC<ModalImportarGastosProps> = ({
         {importPreview.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>
-              Preview:
+              Preview (primeiras 5 linhas):
             </p>
             <div style={{ overflowX: "auto" }}>
               <table
@@ -157,54 +193,87 @@ export const ModalImportarGastos: React.FC<ModalImportarGastosProps> = ({
                     >
                       Valor
                     </th>
+                    <th
+                      style={{
+                        padding: "6px 8px",
+                        border: "1px solid #e5e7eb",
+                        textAlign: "left",
+                      }}
+                    >
+                      Categoria
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {importPreview.map((row, idx) => (
-                    <tr key={idx}>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {row.data_original || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                          color: "#10b981",
-                        }}
-                      >
-                        {row.data_convertida || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {row.descricao || row.description || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                          textAlign: "right",
-                        }}
-                      >
-                        {row.valor || row.amount || "N/A"}
-                      </td>
-                    </tr>
-                  ))}
+                  {importPreview.map((row, idx) => {
+                    // Mapeamento direto - sem função getFieldValue
+                    const dataOriginal =
+                      row.data_original || row.Data || row.data || "N/A";
+                    const descricao =
+                      row.descricao ||
+                      row.Descrição ||
+                      row.description ||
+                      "N/A";
+                    const valor = row.valor || row.Valor || row.amount || "N/A";
+                    const categoria =
+                      row.categoria || row.Categoria || row.category || "N/A";
+
+                    return (
+                      <tr key={idx}>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {dataOriginal}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                            color: "#10b981",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {formatPreviewDate(dataOriginal)}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {descricao}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                            textAlign: "right",
+                          }}
+                        >
+                          {valor}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                            textAlign: "left",
+                          }}
+                        >
+                          {categoria}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
           <button
             onClick={() => {
               setShowModalImportarGastos(false);
@@ -240,6 +309,13 @@ export const ModalImportarGastos: React.FC<ModalImportarGastosProps> = ({
             {importing ? "Importando..." : "Importar"}
           </button>
         </div>
+
+        {importPreview.length === 0 && importFile && (
+          <p style={{ fontSize: 12, color: "#ef4444", marginTop: 12 }}>
+            ⚠️ Nenhum dado válido encontrado. Verifique se o arquivo está no
+            formato correto.
+          </p>
+        )}
       </div>
     </div>
   );

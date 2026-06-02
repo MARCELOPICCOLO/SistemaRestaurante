@@ -1,4 +1,10 @@
+// components/TabelaProdutosPdv.tsx
+
 import React, { useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faShoppingCart } from "@fortawesome/free-solid-svg-icons";
+
+import ModalConfigProduto from "./ModalConfigProduto";
 
 interface Produto {
   id: number;
@@ -16,332 +22,444 @@ interface Categoria {
   name: string;
 }
 
+interface Venda {
+  id: number;
+  customer_name: string;
+  status: string;
+  total?: number;
+  table_id?: number;
+}
+
+interface PontoVenda {
+  id: number;
+  number: number;
+}
+
 interface TabelaProdutosPdvProps {
   produtos: Produto[];
   categorias: Categoria[];
-  onProductSelect: (produto: Produto) => void;
+  pontosVenda?: PontoVenda[];
+
+  onProductSelect: (
+    produto: Produto,
+    vendaId: number,
+    precoPersonalizado: number,
+  ) => void;
+
+  vendasAbertas?: Venda[];
+
   disabled?: boolean;
+
   isMobile?: boolean;
 }
 
 const TabelaProdutosPdv: React.FC<TabelaProdutosPdvProps> = ({
   produtos,
   categorias,
+  pontosVenda = [],
   onProductSelect,
+  vendasAbertas = [],
   disabled = false,
   isMobile = false,
 }) => {
   const [filtroProduto, setFiltroProduto] = useState("");
+
   const [categoriaSelecionada, setCategoriaSelecionada] = useState("todas");
 
-  // Filtrar produtos por nome/código
+  const [modalVisible, setModalVisible] = useState(false);
+
+  const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(
+    null,
+  );
+
+  const [precoPersonalizado, setPrecoPersonalizado] = useState("");
+
+  const [usarPrecoPersonalizado, setUsarPrecoPersonalizado] = useState(false);
+
+  const [vendaSelecionadaId, setVendaSelecionadaId] = useState<number | null>(
+    null,
+  );
+
+  // =========================
+  // FILTROS
+  // =========================
+
   const produtosFiltrados = produtos.filter((produto) => {
     const searchTerm = filtroProduto.toLowerCase();
+
     const matchesName = produto.name.toLowerCase().includes(searchTerm);
+
     const matchesCode =
       produto.product_code &&
       produto.product_code.toLowerCase().includes(searchTerm);
+
     return matchesName || matchesCode;
   });
 
-  // Obter categorias únicas
   const categoriasUnicas = [
     "todas",
     ...new Set(categorias.map((cat) => cat.name)),
   ];
 
-  // Filtrar por categoria
   const produtosFiltradosPorCategoria = produtosFiltrados.filter((produto) => {
     if (categoriaSelecionada === "todas") return true;
+
     const categoriaProduto = categorias.find(
       (cat) => cat.id === produto.category?.id,
     );
+
     return categoriaProduto?.name === categoriaSelecionada;
   });
 
-  // Versão Desktop (Tabela)
+  // =========================
+  // AUXILIARES
+  // =========================
+
+  const getNomePontoVenda = (tableId?: number): string => {
+    if (!tableId) return "-";
+
+    const ponto = pontosVenda.find((p) => p.id === tableId);
+
+    if (!ponto) return "-";
+
+    return ponto.number === 0
+      ? "Balcão"
+      : `Ponto ${ponto.number.toString().padStart(2, "0")}`;
+  };
+
+  const formatCurrency = (value: number): string => {
+    return `R$ ${value.toFixed(2).replace(".", ",")}`;
+  };
+
+  // =========================
+  // AÇÕES
+  // =========================
+
+  const handleAddClick = (produto: Produto) => {
+    if (vendasAbertas.length === 0) {
+      alert("Não há vendas abertas. Abra uma nova venda primeiro.");
+
+      return;
+    }
+
+    setProdutoSelecionado(produto);
+
+    setPrecoPersonalizado("");
+
+    setUsarPrecoPersonalizado(false);
+
+    setVendaSelecionadaId(null);
+
+    setModalVisible(true);
+  };
+
+  const handleConfirmAdd = () => {
+    if (!produtoSelecionado) return;
+
+    let precoFinal = produtoSelecionado.price;
+
+    if (usarPrecoPersonalizado) {
+      const valorNumerico = parseFloat(precoPersonalizado.replace(",", "."));
+
+      if (!isNaN(valorNumerico) && valorNumerico > 0) {
+        precoFinal = valorNumerico;
+      } else {
+        alert("Informe um preço válido");
+        return;
+      }
+    }
+
+    if (vendasAbertas.length === 1 && !vendaSelecionadaId) {
+      onProductSelect(produtoSelecionado, vendasAbertas[0].id, precoFinal);
+
+      closeModal();
+    } else if (vendaSelecionadaId) {
+      onProductSelect(produtoSelecionado, vendaSelecionadaId, precoFinal);
+
+      closeModal();
+    } else {
+      alert("Selecione uma venda");
+    }
+  };
+
+  const closeModal = () => {
+    setModalVisible(false);
+
+    setProdutoSelecionado(null);
+
+    setPrecoPersonalizado("");
+
+    setVendaSelecionadaId(null);
+
+    setUsarPrecoPersonalizado(false);
+  };
+
+  // =========================
+  // DESKTOP
+  // =========================
+
   if (!isMobile) {
     return (
-      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-        {/* Filtros */}
-        <div style={{ marginBottom: 16, flexShrink: 0 }}>
-          {/* Busca */}
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {/* FILTROS */}
+        <div style={{ marginBottom: 16 }}>
           <input
             type="text"
-            placeholder="Buscar por nome ou código..."
+            placeholder="Buscar..."
             value={filtroProduto}
             onChange={(e) => setFiltroProduto(e.target.value)}
             style={{
               width: "100%",
               padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-              outline: "none",
+              borderRadius: 6,
+              border: "1px solid #ccc",
               marginBottom: 12,
-              backgroundColor: "#fff",
             }}
           />
 
-          {/* Filtro de categoria */}
           <div
             style={{
               display: "flex",
               gap: 8,
               overflowX: "auto",
-              paddingBottom: 4,
             }}
           >
-            {categoriasUnicas.map((categoria) => (
+            {categoriasUnicas.map((cat) => (
               <button
-                key={categoria}
-                onClick={() => setCategoriaSelecionada(categoria)}
+                key={cat}
+                onClick={() => setCategoriaSelecionada(cat)}
                 style={{
                   padding: "6px 16px",
                   borderRadius: 20,
                   border:
-                    categoriaSelecionada === categoria
+                    categoriaSelecionada === cat
                       ? "1px solid #10b981"
-                      : "1px solid #e5e7eb",
-                  backgroundColor:
-                    categoriaSelecionada === categoria ? "#f0fdf4" : "#fff",
-                  color:
-                    categoriaSelecionada === categoria ? "#059669" : "#6b7280",
-                  fontSize: 13,
-                  fontWeight: categoriaSelecionada === categoria ? 600 : 400,
+                      : "1px solid #ccc",
+
+                  background: categoriaSelecionada === cat ? "#f0fdf4" : "#fff",
+
+                  color: categoriaSelecionada === cat ? "#059669" : "#666",
+
                   cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.2s",
                 }}
               >
-                {categoria === "todas" ? "Todos" : categoria}
+                {cat === "todas" ? "Todos" : cat}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Tabela de Produtos */}
+        {/* TABELA */}
         <div
           style={{
             flex: 1,
-            overflowY: "auto",
-            border: "1px solid #e5e7eb",
+            overflow: "auto",
+            border: "1px solid #ccc",
             borderRadius: 8,
-            backgroundColor: "#fff",
           }}
         >
           <table
             style={{
               width: "100%",
               borderCollapse: "collapse",
-              fontSize: 14,
             }}
           >
             <thead
               style={{
-                position: "sticky",
-                top: 0,
-                backgroundColor: "#f9fafb",
-                borderBottom: "1px solid #e5e7eb",
-                zIndex: 1,
+                background: "#f9fafb",
+                borderBottom: "1px solid #ccc",
               }}
             >
               <tr>
                 <th
                   style={{
-                    padding: "12px",
+                    padding: 12,
                     textAlign: "left",
-                    fontWeight: 600,
-                    color: "#374151",
-                    borderRight: "1px solid #e5e7eb",
-                    width: "20%",
                   }}
                 >
                   Código
                 </th>
+
                 <th
                   style={{
-                    padding: "12px",
+                    padding: 12,
                     textAlign: "left",
-                    fontWeight: 600,
-                    color: "#374151",
-                    borderRight: "1px solid #e5e7eb",
-                    width: "35%",
                   }}
                 >
                   Produto
                 </th>
+
                 <th
                   style={{
-                    padding: "12px",
+                    padding: 12,
+                    textAlign: "left",
+                  }}
+                >
+                  Categoria
+                </th>
+
+                <th
+                  style={{
+                    padding: 12,
                     textAlign: "right",
-                    fontWeight: 600,
-                    color: "#374151",
-                    borderRight: "1px solid #e5e7eb",
-                    width: "20%",
                   }}
                 >
                   Preço
                 </th>
+
                 <th
                   style={{
-                    padding: "12px",
+                    padding: 12,
                     textAlign: "center",
-                    fontWeight: 600,
-                    color: "#374151",
-                    width: "25%",
                   }}
                 >
                   Ação
                 </th>
               </tr>
             </thead>
+
             <tbody>
-              {produtosFiltradosPorCategoria.length === 0 ? (
-                <tr>
-                  <td colSpan={4}>
-                    <div
-                      style={{
-                        textAlign: "center",
-                        padding: "40px",
-                        color: "#9ca3af",
-                      }}
-                    >
-                      Nenhum produto encontrado
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                produtosFiltradosPorCategoria.map((produto, index) => (
-                  <tr
-                    key={produto.id}
+              {produtosFiltradosPorCategoria.map((p, i) => (
+                <tr
+                  key={p.id}
+                  style={{
+                    borderBottom:
+                      i < produtosFiltradosPorCategoria.length - 1
+                        ? "1px solid #ccc"
+                        : "none",
+                  }}
+                >
+                  <td
                     style={{
-                      borderBottom:
-                        index < produtosFiltradosPorCategoria.length - 1
-                          ? "1px solid #e5e7eb"
-                          : "none",
-                      backgroundColor: index % 2 === 0 ? "#fff" : "#fafafa",
-                      opacity: disabled ? 0.5 : 1,
+                      padding: 12,
                     }}
                   >
-                    <td
+                    {p.product_code || "-"}
+                  </td>
+
+                  <td
+                    style={{
+                      padding: 12,
+                    }}
+                  >
+                    {p.name}
+                  </td>
+
+                  <td
+                    style={{
+                      padding: 12,
+                    }}
+                  >
+                    {categorias.find((c) => c.id === p.category?.id)?.name ||
+                      "-"}
+                  </td>
+
+                  <td
+                    style={{
+                      padding: 12,
+                      textAlign: "right",
+                    }}
+                  >
+                    {formatCurrency(p.price)}
+                  </td>
+
+                  <td
+                    style={{
+                      padding: 12,
+                      textAlign: "center",
+                    }}
+                  >
+                    <button
+                      onClick={() => handleAddClick(p)}
+                      disabled={disabled}
                       style={{
-                        padding: "12px",
-                        borderRight: "1px solid #e5e7eb",
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        color: "#6b7280",
+                        padding: "4px 12px",
+
+                        borderRadius: 4,
+
+                        border: "none",
+
+                        background: "#10b981",
+
+                        color: "#fff",
+
+                        cursor: "pointer",
                       }}
                     >
-                      {produto.product_code || "-"}
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px",
-                        borderRight: "1px solid #e5e7eb",
-                      }}
-                    >
-                      <div style={{ fontWeight: 500 }}>{produto.name}</div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#9ca3af",
-                          marginTop: 2,
-                        }}
-                      >
-                        {
-                          categorias.find(
-                            (cat) => cat.id === produto.category?.id,
-                          )?.name
-                        }
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px",
-                        textAlign: "right",
-                        borderRight: "1px solid #e5e7eb",
-                        fontWeight: 600,
-                        color: "#059669",
-                      }}
-                    >
-                      R$ {Number(produto.price).toFixed(2)}
-                    </td>
-                    <td style={{ padding: "12px", textAlign: "center" }}>
-                      <button
-                        onClick={() => onProductSelect(produto)}
-                        disabled={disabled}
-                        style={{
-                          padding: "6px 16px",
-                          borderRadius: 6,
-                          border: "none",
-                          backgroundColor: disabled ? "#9ca3af" : "#10b981",
-                          color: "#fff",
-                          fontWeight: 500,
-                          cursor: disabled ? "not-allowed" : "pointer",
-                          fontSize: 13,
-                          transition: "all 0.2s",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!disabled) {
-                            e.currentTarget.style.backgroundColor = "#059669";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!disabled) {
-                            e.currentTarget.style.backgroundColor = "#10b981";
-                          }
-                        }}
-                      >
-                        Adicionar
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
+                      <FontAwesomeIcon icon={faShoppingCart} /> Adicionar
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
 
-        {/* Estatísticas */}
+        {/* FOOTER */}
         <div
           style={{
             marginTop: 12,
-            padding: "8px 12px",
-            backgroundColor: "#f9fafb",
+            padding: 8,
+            background: "#f9fafb",
             borderRadius: 6,
-            fontSize: 12,
-            color: "#6b7280",
             textAlign: "center",
-            flexShrink: 0,
+            fontSize: 12,
           }}
         >
           Total: {produtosFiltradosPorCategoria.length} produtos
-          {categoriaSelecionada !== "todas" && ` em ${categoriaSelecionada}`}
         </div>
+
+        {modalVisible && (
+          <ModalConfigProduto
+            produtoSelecionado={produtoSelecionado}
+            vendasAbertas={vendasAbertas}
+            vendaSelecionadaId={vendaSelecionadaId}
+            setVendaSelecionadaId={setVendaSelecionadaId}
+            precoPersonalizado={precoPersonalizado}
+            setPrecoPersonalizado={setPrecoPersonalizado}
+            usarPrecoPersonalizado={usarPrecoPersonalizado}
+            setUsarPrecoPersonalizado={setUsarPrecoPersonalizado}
+            closeModal={closeModal}
+            handleConfirmAdd={handleConfirmAdd}
+            getNomePontoVenda={getNomePontoVenda}
+            formatCurrency={formatCurrency}
+          />
+        )}
       </div>
     );
   }
 
-  // Versão Mobile (Cards)
+  // =========================
+  // MOBILE
+  // =========================
+
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      {/* Filtros */}
-      <div style={{ marginBottom: 16, flexShrink: 0 }}>
+    <div
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* FILTROS */}
+      <div style={{ marginBottom: 16 }}>
         <input
           type="text"
-          placeholder="Buscar por nome ou código..."
+          placeholder="Buscar..."
           value={filtroProduto}
           onChange={(e) => setFiltroProduto(e.target.value)}
           style={{
             width: "100%",
-            padding: "10px 12px",
-            borderRadius: 8,
-            border: "1px solid #e5e7eb",
-            fontSize: 14,
-            outline: "none",
+            padding: "10px",
+            borderRadius: 6,
+            border: "1px solid #ccc",
             marginBottom: 12,
-            backgroundColor: "#fff",
           }}
         />
 
@@ -350,140 +468,144 @@ const TabelaProdutosPdv: React.FC<TabelaProdutosPdvProps> = ({
             display: "flex",
             gap: 8,
             overflowX: "auto",
-            paddingBottom: 4,
           }}
         >
-          {categoriasUnicas.map((categoria) => (
+          {categoriasUnicas.map((cat) => (
             <button
-              key={categoria}
-              onClick={() => setCategoriaSelecionada(categoria)}
+              key={cat}
+              onClick={() => setCategoriaSelecionada(cat)}
               style={{
                 padding: "8px 16px",
                 borderRadius: 20,
                 border:
-                  categoriaSelecionada === categoria
+                  categoriaSelecionada === cat
                     ? "1px solid #10b981"
-                    : "1px solid #e5e7eb",
-                backgroundColor:
-                  categoriaSelecionada === categoria ? "#f0fdf4" : "#fff",
-                color:
-                  categoriaSelecionada === categoria ? "#059669" : "#6b7280",
-                fontSize: 13,
-                fontWeight: categoriaSelecionada === categoria ? 600 : 400,
+                    : "1px solid #ccc",
+
+                background: categoriaSelecionada === cat ? "#f0fdf4" : "#fff",
+
+                color: categoriaSelecionada === cat ? "#059669" : "#666",
+
                 cursor: "pointer",
-                whiteSpace: "nowrap",
               }}
             >
-              {categoria === "todas" ? "Todos" : categoria}
+              {cat === "todas" ? "Todos" : cat}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Lista de Produtos Mobile */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        {produtosFiltradosPorCategoria.length === 0 ? (
+      {/* CARDS */}
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+        }}
+      >
+        {produtosFiltradosPorCategoria.map((p) => (
           <div
+            key={p.id}
             style={{
-              textAlign: "center",
-              padding: "40px",
-              color: "#9ca3af",
+              background: "#fff",
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 8,
+              border: "1px solid #ccc",
             }}
           >
-            Nenhum produto encontrado
-          </div>
-        ) : (
-          produtosFiltradosPorCategoria.map((produto) => (
             <div
-              key={produto.id}
               style={{
-                backgroundColor: "#fff",
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 8,
-                border: "1px solid #e5e7eb",
-                opacity: disabled ? 0.5 : 1,
+                fontWeight: 600,
               }}
             >
-              <div
+              {p.name}
+            </div>
+
+            <div
+              style={{
+                fontSize: 12,
+                color: "#666",
+              }}
+            >
+              Cód: {p.product_code || "-"}
+            </div>
+
+            <div
+              style={{
+                fontSize: 12,
+                color: "#666",
+                marginBottom: 8,
+              }}
+            >
+              {categorias.find((c) => c.id === p.category?.id)?.name || "-"}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+
+                alignItems: "center",
+              }}
+            >
+              <span
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  marginBottom: 8,
+                  fontWeight: 700,
+                  color: "#059669",
                 }}
               >
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>
-                    {produto.name}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
-                    {
-                      categorias.find((cat) => cat.id === produto.category?.id)
-                        ?.name
-                    }
-                  </div>
-                  {produto.product_code && (
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#6b7280",
-                        marginTop: 2,
-                        fontFamily: "monospace",
-                      }}
-                    >
-                      Cód: {produto.product_code}
-                    </div>
-                  )}
-                </div>
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: 16,
-                    color: "#059669",
-                  }}
-                >
-                  R$ {Number(produto.price).toFixed(2)}
-                </div>
-              </div>
+                {formatCurrency(p.price)}
+              </span>
+
               <button
-                onClick={() => onProductSelect(produto)}
+                onClick={() => handleAddClick(p)}
                 disabled={disabled}
                 style={{
-                  width: "100%",
-                  padding: "10px",
-                  borderRadius: 6,
+                  padding: "6px 12px",
+                  borderRadius: 4,
                   border: "none",
-                  backgroundColor: disabled ? "#9ca3af" : "#10b981",
+                  background: "#10b981",
                   color: "#fff",
-                  fontWeight: 500,
-                  cursor: disabled ? "not-allowed" : "pointer",
-                  fontSize: 14,
-                  marginTop: 8,
+                  cursor: "pointer",
                 }}
               >
-                Adicionar à comanda
+                <FontAwesomeIcon icon={faShoppingCart} /> Adicionar
               </button>
             </div>
-          ))
-        )}
+          </div>
+        ))}
       </div>
 
-      {/* Estatísticas */}
+      {/* FOOTER */}
       <div
         style={{
           marginTop: 12,
-          padding: "10px",
-          backgroundColor: "#f9fafb",
+          padding: 10,
+          background: "#f9fafb",
           borderRadius: 6,
-          fontSize: 12,
-          color: "#6b7280",
           textAlign: "center",
-          flexShrink: 0,
+          fontSize: 12,
         }}
       >
         Total: {produtosFiltradosPorCategoria.length} produtos
       </div>
+
+      {modalVisible && (
+        <ModalConfigProduto
+          produtoSelecionado={produtoSelecionado}
+          vendasAbertas={vendasAbertas}
+          vendaSelecionadaId={vendaSelecionadaId}
+          setVendaSelecionadaId={setVendaSelecionadaId}
+          precoPersonalizado={precoPersonalizado}
+          setPrecoPersonalizado={setPrecoPersonalizado}
+          usarPrecoPersonalizado={usarPrecoPersonalizado}
+          setUsarPrecoPersonalizado={setUsarPrecoPersonalizado}
+          closeModal={closeModal}
+          handleConfirmAdd={handleConfirmAdd}
+          getNomePontoVenda={getNomePontoVenda}
+          formatCurrency={formatCurrency}
+        />
+      )}
     </div>
   );
 };

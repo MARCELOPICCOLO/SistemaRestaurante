@@ -23,6 +23,19 @@ export const ModalImportarVendas: React.FC<ModalImportarVendasProps> = ({
 }) => {
   if (!showModalImportarVendas) return null;
 
+  // Função para formatar data no preview
+  const formatPreviewDate = (dateStr: string): string => {
+    if (!dateStr || dateStr === "N/A") return "N/A";
+
+    // Se já estiver no formato ISO (YYYY-MM-DD)
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = dateStr.split("-");
+      return `${day}/${month}/${year}`;
+    }
+
+    return dateStr;
+  };
+
   return (
     <div
       style={{
@@ -67,12 +80,13 @@ export const ModalImportarVendas: React.FC<ModalImportarVendasProps> = ({
             📋 Formato esperado:
           </p>
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>
-            cliente,valor,data,pagamento
+            <strong>Delimitador:</strong> ponto e vírgula (;) <br />
+            <strong>Colunas:</strong> Data;Cliente;Valor;Pagamento
             <br />
-            João Silva,150.00,05/01/2026,pix
+            Exemplo: 05/01/2026;João Silva;150.00;pix
           </p>
           <p style={{ margin: "8px 0 0", fontSize: 11, color: "#10b981" }}>
-            ✅ Datas no formato DD/MM/AAAA são convertidas automaticamente
+            ✅ Datas nos formatos DD/MM/AAAA ou AAAA-MM-DD são aceitas
           </p>
         </div>
 
@@ -109,7 +123,7 @@ export const ModalImportarVendas: React.FC<ModalImportarVendasProps> = ({
         {importPreview.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>
-              Preview:
+              Preview (primeiras 5 linhas):
             </p>
             <div style={{ overflowX: "auto" }}>
               <table
@@ -169,59 +183,81 @@ export const ModalImportarVendas: React.FC<ModalImportarVendasProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {importPreview.map((row, idx) => (
-                    <tr key={idx}>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {row.data_original || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                          color: "#10b981",
-                        }}
-                      >
-                        {row.data_convertida || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {row.cliente || row.customer_name || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                          textAlign: "right",
-                        }}
-                      >
-                        {row.valor || row.total || "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "6px 8px",
-                          border: "1px solid #e5e7eb",
-                        }}
-                      >
-                        {row.pagamento || row.payment_method || "N/A"}
-                      </td>
-                    </tr>
-                  ))}
+                  {importPreview.map((row, idx) => {
+                    // Mapeamento direto dos campos que vêm do preview
+                    const dataOriginal =
+                      row.data_original || row.Data || row.data || "N/A";
+                    const cliente =
+                      row.cliente || row.Cliente || row.customer_name || "N/A";
+                    const valor = row.valor || row.Valor || row.amount || "N/A";
+                    const pagamento =
+                      row.pagamento ||
+                      row.Pagamento ||
+                      row.payment_method ||
+                      "N/A";
+
+                    return (
+                      <tr key={idx}>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {dataOriginal}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                            color: "#10b981",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {formatPreviewDate(dataOriginal)}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {cliente}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                            textAlign: "right",
+                          }}
+                        >
+                          {valor}
+                        </td>
+                        <td
+                          style={{
+                            padding: "6px 8px",
+                            border: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {pagamento}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 12 }}>
+        {importPreview.length === 0 && importFile && (
+          <p style={{ fontSize: 12, color: "#ef4444", marginTop: 12 }}>
+            ⚠️ Nenhum dado válido encontrado. Verifique se o arquivo está no
+            formato correto.
+          </p>
+        )}
+
+        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
           <button
             onClick={() => {
               setShowModalImportarVendas(false);

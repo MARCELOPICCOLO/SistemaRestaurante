@@ -2,7 +2,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { SidebarVendas } from "../../components/SidebarVendas";
-import { TabelaProdutosPdv } from "../../components/TabelaProdutosPdv";
+import TabelaProdutosPdv from "../../components/TabelaProdutosPdv";
+import { DetalhesVenda } from "../../components/DetalheVenda";
+import { TabelaComandas } from "../../components/TabelaComandas";
+import { ModalFinalizarVenda } from "../../components/ModalFinalizarVenda";
+
 import {
   faArrowLeft,
   faPlus,
@@ -14,7 +18,6 @@ import {
   faBars,
   faBoxes,
   faClipboardList,
-  faFilter,
 } from "@fortawesome/free-solid-svg-icons";
 
 interface Product {
@@ -81,17 +84,13 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
   const [pontosVenda, setPontosVenda] = useState<PontoVenda[]>([]);
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
-  const [filtroVenda, setFiltroVenda] = useState<
-    "todas" | "abertas" | "fechadas"
-  >("abertas");
   const [showModalNovaVenda, setShowModalNovaVenda] = useState(false);
   const [pontoSelecionado, setPontoSelecionado] = useState<number>(0);
   const [novoCliente, setNovoCliente] = useState("");
   const [showModalFecharVenda, setShowModalFecharVenda] = useState(false);
   const [formaPagamento, setFormaPagamento] = useState("");
-  const [dataInicio, setDataInicio] = useState("");
-  const [dataFim, setDataFim] = useState("");
-  const [showFiltroData, setShowFiltroData] = useState(false);
+  const [valorRecebido, setValorRecebido] = useState("");
+  const [troco, setTroco] = useState(0);
 
   // Detectar mobile
   useEffect(() => {
@@ -179,20 +178,6 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
     fetchVendas();
   }, [fetchProdutos, fetchVendas, fetchPontosVenda]);
 
-  // Filtrar vendas por data e status
-  const vendasFiltradas = vendas.filter((venda) => {
-    if (filtroVenda === "abertas" && venda.status !== "aberto") return false;
-    if (filtroVenda === "fechadas" && venda.status !== "fechado") return false;
-    if (dataInicio || dataFim) {
-      const dataVenda = venda.created_at
-        ? new Date(venda.created_at).toISOString().split("T")[0]
-        : "";
-      if (dataInicio && dataVenda < dataInicio) return false;
-      if (dataFim && dataVenda > dataFim) return false;
-    }
-    return true;
-  });
-
   // Abrir nova venda
   const abrirVenda = async () => {
     if (!pontoSelecionado) {
@@ -221,14 +206,13 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
         alert(error.message || "Erro ao abrir venda");
         return;
       }
-
       const data = await response.json();
       const novaVenda = data.order || data;
       await fetchVendas();
       setVendaSelecionada(novaVenda);
       setShowModalNovaVenda(false);
       setNovoCliente("");
-      alert(`Venda iniciada com sucesso!`);
+      alert("Venda iniciada com sucesso!");
     } catch (error) {
       console.error("Erro ao abrir venda:", error);
       alert("Erro ao conectar com o servidor");
@@ -236,15 +220,17 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
   };
 
   // Adicionar item à venda
-  const addItemToVenda = async (produto: Product) => {
-    if (!vendaSelecionada) {
-      alert("Selecione uma venda primeiro");
-      return;
-    }
-
+  const addItemToVenda = async (
+    produto: Product,
+    vendaId: number,
+    quantidade: number = 1,
+    precoPersonalizado?: number,
+  ) => {
     try {
+      const precoFinal = precoPersonalizado || produto.price;
+
       const response = await fetch(
-        `http://localhost:8000/api/orders/${vendaSelecionada.id}/items`,
+        `http://localhost:8000/api/orders/${vendaId}/items`,
         {
           method: "POST",
           headers: {
@@ -253,6 +239,8 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
           },
           body: JSON.stringify({
             product_id: produto.id,
+            quantity: quantidade,
+            price: precoFinal,
           }),
         },
       );
@@ -265,19 +253,25 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
 
       await fetchVendas();
       const updatedResponse = await fetch(
-        `http://localhost:8000/api/orders/${vendaSelecionada.id}`,
+        `http://localhost:8000/api/orders/${vendaId}`,
       );
       const updatedVenda = await updatedResponse.json();
-      setVendaSelecionada({
-        ...updatedVenda,
-        total:
-          updatedVenda.items?.reduce(
-            (sum: number, item: any) =>
-              sum + Number(item.price) * item.quantity,
-            0,
-          ) || 0,
-      });
-      alert(`${produto.name} adicionado!`);
+
+      if (vendaSelecionada?.id === vendaId) {
+        setVendaSelecionada({
+          ...updatedVenda,
+          total:
+            updatedVenda.items?.reduce(
+              (sum: number, item: any) =>
+                sum + Number(item.price) * item.quantity,
+              0,
+            ) || 0,
+        });
+      }
+
+      alert(
+        `${quantidade}x ${produto.name} adicionado${precoPersonalizado ? ` com preço especial de ${formatCurrency(precoPersonalizado)}` : ""}!`,
+      );
     } catch (error) {
       console.error("Erro ao adicionar item:", error);
       alert("Erro ao conectar com o servidor");
@@ -334,6 +328,15 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
       return;
     }
 
+    if (formaPagamento === "dinheiro") {
+      const total = calcularTotal(vendaSelecionada?.items);
+      const recebido = parseFloat(valorRecebido) || 0;
+      if (recebido < total) {
+        alert(`Valor insuficiente. Total da venda: ${formatCurrency(total)}`);
+        return;
+      }
+    }
+
     try {
       const response = await fetch(
         `http://localhost:8000/api/orders/${vendaSelecionada.id}/close`,
@@ -359,17 +362,13 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
       await fetchVendas();
       setShowModalFecharVenda(false);
       setFormaPagamento("");
+      setValorRecebido("");
+      setTroco(0);
       alert("Venda finalizada com sucesso!");
     } catch (error) {
       console.error("Erro ao finalizar venda:", error);
       alert("Erro ao conectar com o servidor");
     }
-  };
-
-  const limparFiltroData = () => {
-    setDataInicio("");
-    setDataFim("");
-    setShowFiltroData(false);
   };
 
   const formatCurrency = (value: any): string => {
@@ -385,294 +384,7 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
     );
   };
 
-  // Componente de listagem de Comandas
-  const ListaComandas = () => (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Filtros */}
-      <div
-        style={{
-          background: "#fff",
-          padding: "16px 20px",
-          borderRadius: 8,
-          marginBottom: 20,
-          border: "1px solid #e5e7eb",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => setFiltroVenda("abertas")}
-              style={{
-                padding: "6px 16px",
-                borderRadius: 20,
-                border:
-                  filtroVenda === "abertas"
-                    ? "1px solid #10b981"
-                    : "1px solid #e5e7eb",
-                background: filtroVenda === "abertas" ? "#f0fdf4" : "#fff",
-                color: filtroVenda === "abertas" ? "#059669" : "#6b7280",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              Abertas
-            </button>
-            <button
-              onClick={() => setFiltroVenda("fechadas")}
-              style={{
-                padding: "6px 16px",
-                borderRadius: 20,
-                border:
-                  filtroVenda === "fechadas"
-                    ? "1px solid #10b981"
-                    : "1px solid #e5e7eb",
-                background: filtroVenda === "fechadas" ? "#f0fdf4" : "#fff",
-                color: filtroVenda === "fechadas" ? "#059669" : "#6b7280",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              Fechadas
-            </button>
-            <button
-              onClick={() => setFiltroVenda("todas")}
-              style={{
-                padding: "6px 16px",
-                borderRadius: 20,
-                border:
-                  filtroVenda === "todas"
-                    ? "1px solid #10b981"
-                    : "1px solid #e5e7eb",
-                background: filtroVenda === "todas" ? "#f0fdf4" : "#fff",
-                color: filtroVenda === "todas" ? "#059669" : "#6b7280",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              Todas
-            </button>
-          </div>
-
-          <div style={{ flex: 1 }} />
-
-          <button
-            onClick={() => setShowFiltroData(!showFiltroData)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              background: "#fff",
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            <FontAwesomeIcon icon={faFilter} /> Filtrar por Data
-          </button>
-
-          {(dataInicio || dataFim) && (
-            <button
-              onClick={limparFiltroData}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "none",
-                background: "#fee2e2",
-                color: "#dc2626",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              Limpar Filtros
-            </button>
-          )}
-        </div>
-
-        {showFiltroData && (
-          <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "#6b7280",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Data Início
-              </label>
-              <input
-                type="date"
-                value={dataInicio}
-                onChange={(e) => setDataInicio(e.target.value)}
-                style={{
-                  padding: "8px",
-                  borderRadius: 6,
-                  border: "1px solid #e5e7eb",
-                  fontSize: 13,
-                }}
-              />
-            </div>
-            <div>
-              <label
-                style={{
-                  fontSize: 11,
-                  color: "#6b7280",
-                  display: "block",
-                  marginBottom: 4,
-                }}
-              >
-                Data Fim
-              </label>
-              <input
-                type="date"
-                value={dataFim}
-                onChange={(e) => setDataFim(e.target.value)}
-                style={{
-                  padding: "8px",
-                  borderRadius: 6,
-                  border: "1px solid #e5e7eb",
-                  fontSize: 13,
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Cards de Comandas */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: 16,
-        }}
-      >
-        {vendasFiltradas.map((venda) => (
-          <div
-            key={venda.id}
-            onClick={() => setVendaSelecionada(venda)}
-            style={{
-              background:
-                vendaSelecionada?.id === venda.id ? "#f0fdf4" : "#fff",
-              borderRadius: 12,
-              padding: 16,
-              border:
-                vendaSelecionada?.id === venda.id
-                  ? "2px solid #10b981"
-                  : "1px solid #e5e7eb",
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.boxShadow = "none";
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                marginBottom: 12,
-              }}
-            >
-              <div>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
-                  {venda.customer_name}
-                </h3>
-                <p
-                  style={{ margin: "4px 0 0", fontSize: 11, color: "#6b7280" }}
-                >
-                  Venda #{venda.id}
-                </p>
-              </div>
-              <span
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: 12,
-                  fontSize: 10,
-                  background: venda.status === "aberto" ? "#d1fae5" : "#fee2e2",
-                  color: venda.status === "aberto" ? "#059669" : "#dc2626",
-                }}
-              >
-                {venda.status === "aberto" ? "Em andamento" : "Finalizada"}
-              </span>
-            </div>
-
-            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 8,
-                }}
-              >
-                <span style={{ fontSize: 12, color: "#6b7280" }}>Itens:</span>
-                <span style={{ fontSize: 13, fontWeight: 500 }}>
-                  {venda.items?.length || 0}
-                </span>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 8,
-                }}
-              >
-                <span style={{ fontSize: 12, color: "#6b7280" }}>Total:</span>
-                <span
-                  style={{ fontSize: 16, fontWeight: 700, color: "#059669" }}
-                >
-                  {formatCurrency(venda.total || 0)}
-                </span>
-              </div>
-              {venda.created_at && (
-                <div
-                  style={{ display: "flex", justifyContent: "space-between" }}
-                >
-                  <span style={{ fontSize: 11, color: "#9ca3af" }}>Data:</span>
-                  <span style={{ fontSize: 11, color: "#6b7280" }}>
-                    {new Date(venda.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {vendasFiltradas.length === 0 && (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "60px 20px",
-            color: "#9ca3af",
-          }}
-        >
-          <FontAwesomeIcon
-            icon={faClipboardList}
-            style={{ fontSize: 48, marginBottom: 12 }}
-          />
-          <p>Nenhuma venda encontrada</p>
-          <p style={{ fontSize: 12 }}>
-            Clique em "Nova Venda" para iniciar um atendimento
-          </p>
-        </div>
-      )}
-    </div>
-  );
+  const vendasAbertas = vendas.filter((v) => v.status === "aberto");
 
   // Modal Nova Venda
   const ModalNovaVenda = () => (
@@ -817,143 +529,6 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
     </div>
   );
 
-  // Modal Finalizar Venda
-  const ModalFinalizarVenda = () => {
-    const total = calcularTotal(vendaSelecionada?.items);
-    const opcoesPagamento = [
-      { value: "dinheiro", label: "Dinheiro", icon: "💰" },
-      { value: "pix", label: "PIX", icon: "📱" },
-      { value: "credito", label: "Cartão de Crédito", icon: "💳" },
-      { value: "debito", label: "Cartão de Débito", icon: "💳" },
-    ];
-
-    return (
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: "rgba(0,0,0,0.5)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 1000,
-        }}
-        onClick={() => setShowModalFecharVenda(false)}
-      >
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 24,
-            width: "90%",
-            maxWidth: 450,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <h2 style={{ margin: "0 0 8px 0", fontSize: 24 }}>Finalizar Venda</h2>
-          <p style={{ margin: "0 0 20px 0", color: "#6b7280" }}>
-            Cliente: {vendaSelecionada?.customer_name}
-          </p>
-
-          <div
-            style={{
-              background: "#f3f4f6",
-              padding: 16,
-              borderRadius: 8,
-              marginBottom: 20,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>Total da venda:</span>
-              <span
-                style={{ fontSize: 18, fontWeight: "bold", color: "#059669" }}
-              >
-                {formatCurrency(total)}
-              </span>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 20 }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: 8,
-                fontSize: 14,
-                fontWeight: 500,
-              }}
-            >
-              Forma de pagamento:
-            </label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {opcoesPagamento.map((opcao) => (
-                <button
-                  key={opcao.value}
-                  onClick={() => setFormaPagamento(opcao.value)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    width: "100%",
-                    padding: "12px 16px",
-                    borderRadius: 8,
-                    border:
-                      formaPagamento === opcao.value
-                        ? "2px solid #10b981"
-                        : "1px solid #e5e7eb",
-                    background:
-                      formaPagamento === opcao.value ? "#f0fdf4" : "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <span>
-                    {opcao.icon} {opcao.label}
-                  </span>
-                  {formaPagamento === opcao.value && (
-                    <span style={{ color: "#10b981" }}>✓</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 12 }}>
-            <button
-              onClick={() => setShowModalFecharVenda(false)}
-              style={{
-                flex: 1,
-                padding: "10px",
-                borderRadius: 8,
-                border: "1px solid #e5e7eb",
-                background: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={finalizarVenda}
-              disabled={!formaPagamento}
-              style={{
-                flex: 1,
-                padding: "10px",
-                borderRadius: 8,
-                border: "none",
-                background: !formaPagamento ? "#9ca3af" : "#10b981",
-                color: "#fff",
-                cursor: !formaPagamento ? "not-allowed" : "pointer",
-              }}
-            >
-              Finalizar
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // Versão Desktop
   if (!isMobile) {
     return (
@@ -973,7 +548,6 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
             onVoltarDashboard={() => setTela && setTela("dashboard")}
           />
 
-          {/* Conteúdo do Meio - Produtos ou Comandas */}
           <div
             style={{
               padding: "20px",
@@ -987,165 +561,97 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
               <TabelaProdutosPdv
                 produtos={produtos}
                 categorias={categorias}
-                onProductSelect={(produto) => addItemToVenda(produto)}
-                disabled={!vendaSelecionada}
+                pontosVenda={pontosVenda}
+                onProductSelect={(produto, vendaId, precoPersonalizado) =>
+                  addItemToVenda(produto, vendaId, 1, precoPersonalizado)
+                }
+                vendasAbertas={vendasAbertas}
+                disabled={false}
                 isMobile={false}
               />
             ) : (
-              <ListaComandas />
+              <TabelaComandas
+                vendas={vendas}
+                pontosVenda={pontosVenda}
+                vendaSelecionada={vendaSelecionada}
+                onVendaClick={setVendaSelecionada}
+                isMobile={false}
+                formatCurrency={formatCurrency}
+              />
             )}
           </div>
 
-          {/* Detalhes da Venda Selecionada */}
-          <div
-            style={{
-              background: "#fff",
-              display: "flex",
-              flexDirection: "column",
-              height: "100vh",
-            }}
-          >
-            <div style={{ padding: "20px", borderBottom: "1px solid #e5e7eb" }}>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-                Venda Atual
-              </h2>
-              {vendaSelecionada && (
-                <p
-                  style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}
-                >
-                  Cliente: {vendaSelecionada.customer_name} • #
-                  {vendaSelecionada.id}
-                </p>
-              )}
-            </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "20px" }}>
-              {!vendaSelecionada ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    color: "#9ca3af",
-                    padding: "40px",
-                  }}
-                >
-                  <FontAwesomeIcon
-                    icon={faShoppingCart}
-                    style={{ fontSize: 48, marginBottom: 12 }}
-                  />
-                  <p>Selecione uma venda na lista de comandas</p>
-                </div>
-              ) : vendaSelecionada.items?.length === 0 ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    color: "#9ca3af",
-                    padding: "40px",
-                  }}
-                >
-                  <FontAwesomeIcon
-                    icon={faShoppingCart}
-                    style={{ fontSize: 48, marginBottom: 12 }}
-                  />
-                  <p>Nenhum item adicionado</p>
-                  <p style={{ fontSize: 12 }}>
-                    Clique nos produtos ao lado para adicionar
-                  </p>
-                </div>
-              ) : (
-                vendaSelecionada.items?.map((item) => (
-                  <div
-                    key={item.id}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "12px",
-                      marginBottom: 8,
-                      background: "#f9fafb",
-                      borderRadius: 8,
-                      border: "1px solid #e5e7eb",
-                    }}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500, fontSize: 14 }}>
-                        {item.product?.name || `Produto ${item.product_id}`}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>
-                        {item.quantity}x {formatCurrency(item.price)} ={" "}
-                        {formatCurrency(item.price * item.quantity)}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => removerItem(vendaSelecionada.id, item.id)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "#dc2626",
-                        fontSize: 16,
-                      }}
-                    >
-                      <FontAwesomeIcon icon={faTrash} />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-            {vendaSelecionada && vendaSelecionada.status === "aberto" && (
-              <div style={{ padding: "20px", borderTop: "1px solid #e5e7eb" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 12,
-                  }}
-                >
-                  <span style={{ fontWeight: 600, fontSize: 16 }}>Total</span>
-                  <span
-                    style={{
-                      fontWeight: "bold",
-                      fontSize: 20,
-                      color: "#059669",
-                    }}
-                  >
-                    {formatCurrency(calcularTotal(vendaSelecionada.items))}
-                  </span>
-                </div>
-                <button
-                  onClick={() => setShowModalFecharVenda(true)}
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    background: "#10b981",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 8,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontSize: 14,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#059669";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "#10b981";
-                  }}
-                >
-                  <FontAwesomeIcon icon={faCheck} style={{ marginRight: 8 }} />
-                  Finalizar Venda
-                </button>
-              </div>
-            )}
-          </div>
+          <DetalhesVenda
+            venda={vendaSelecionada}
+            pontosVenda={pontosVenda}
+            onRemoverItem={removerItem}
+            onFinalizarVenda={() => setShowModalFecharVenda(true)}
+            formatCurrency={formatCurrency}
+            isMobile={false}
+          />
         </div>
         {showModalNovaVenda && <ModalNovaVenda />}
-        {showModalFecharVenda && <ModalFinalizarVenda />}
+        {showModalFecharVenda && (
+          <ModalFinalizarVenda
+            isOpen={showModalFecharVenda}
+            venda={vendaSelecionada}
+            onClose={() => {
+              setShowModalFecharVenda(false);
+              setFormaPagamento("");
+            }}
+            onConfirm={async (formaPagamento, valorRecebido) => {
+              if (!vendaSelecionada) return;
+
+              try {
+                const response = await fetch(
+                  `http://localhost:8000/api/orders/${vendaSelecionada.id}/close`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Accept: "application/json",
+                    },
+                    body: JSON.stringify({
+                      payment_method: formaPagamento,
+                    }),
+                  },
+                );
+
+                if (!response.ok) {
+                  const error = await response.json();
+                  alert(error.message || "Erro ao finalizar venda");
+                  return;
+                }
+
+                setVendaSelecionada(null);
+                await fetchVendas();
+                setShowModalFecharVenda(false);
+                alert("Venda finalizada com sucesso!");
+              } catch (error) {
+                console.error("Erro ao finalizar venda:", error);
+                alert("Erro ao conectar com o servidor");
+              }
+            }}
+            formatCurrency={formatCurrency}
+          />
+        )}
       </>
     );
   }
 
   // Versão Mobile
   return (
-    <div style={{ background: "#f3f4f6", minHeight: "100vh" }}>
+    <div
+      style={{
+        background: "#f3f4f6",
+        minHeight: "100vh",
+        paddingBottom:
+          vendaSelecionada && vendaSelecionada.status === "aberto"
+            ? "80px"
+            : "0",
+      }}
+    >
+      {/* Header Mobile */}
       <div
         style={{
           padding: "16px",
@@ -1193,6 +699,7 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
         </button>
       </div>
 
+      {/* Botão Voltar ao Dashboard */}
       <div style={{ padding: "12px 16px" }}>
         <button
           onClick={() => setTela && setTela("dashboard")}
@@ -1332,129 +839,135 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
       {/* Conteúdo Mobile */}
       <div style={{ padding: "16px" }}>
         {abaAtiva === "produtos" ? (
-          <TabelaProdutosPdv
-            produtos={produtos}
-            categorias={categorias}
-            onProductSelect={(produto) => addItemToVenda(produto)}
-            disabled={!vendaSelecionada}
-            isMobile={true}
-          />
-        ) : (
-          vendasFiltradas.map((venda) => (
-            <div
-              key={venda.id}
-              onClick={() => setVendaSelecionada(venda)}
-              style={{
-                background:
-                  vendaSelecionada?.id === venda.id ? "#f0fdf4" : "#fff",
-                borderRadius: 12,
-                padding: 16,
-                marginBottom: 12,
-                border:
-                  vendaSelecionada?.id === venda.id
-                    ? "2px solid #10b981"
-                    : "1px solid #e5e7eb",
-                cursor: "pointer",
-              }}
-            >
+          <>
+            <TabelaProdutosPdv
+              produtos={produtos}
+              categorias={categorias}
+              pontosVenda={pontosVenda}
+              onProductSelect={(produto, vendaId, precoPersonalizado) =>
+                addItemToVenda(produto, vendaId, 1, precoPersonalizado)
+              }
+              vendasAbertas={vendasAbertas}
+              disabled={false}
+              isMobile={true}
+            />
+            {vendaSelecionada && vendaSelecionada.status === "aberto" && (
               <div
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  marginBottom: 12,
+                  position: "fixed",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  background: "#fff",
+                  borderTop: "1px solid #e5e7eb",
+                  padding: "16px",
+                  boxShadow: "0 -2px 10px rgba(0,0,0,0.1)",
+                  zIndex: 100,
                 }}
               >
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 16 }}>
-                    {venda.customer_name}
-                  </h3>
-                  <p
-                    style={{
-                      margin: "4px 0 0",
-                      fontSize: 11,
-                      color: "#6b7280",
-                    }}
-                  >
-                    #{venda.id}
-                  </p>
-                </div>
-                <span
+                <div
                   style={{
-                    padding: "4px 8px",
-                    borderRadius: 12,
-                    fontSize: 10,
-                    background:
-                      venda.status === "aberto" ? "#d1fae5" : "#fee2e2",
-                    color: venda.status === "aberto" ? "#059669" : "#dc2626",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
                   }}
                 >
-                  {venda.status === "aberto" ? "Aberta" : "Finalizada"}
-                </span>
-              </div>
-              <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
-                <div
-                  style={{ display: "flex", justifyContent: "space-between" }}
-                >
-                  <span style={{ fontSize: 12, color: "#6b7280" }}>Total:</span>
+                  <span>{vendaSelecionada.customer_name}</span>
                   <span
-                    style={{ fontSize: 16, fontWeight: 700, color: "#059669" }}
+                    style={{
+                      fontWeight: "bold",
+                      color: "#059669",
+                      fontSize: 18,
+                    }}
                   >
-                    {formatCurrency(venda.total || 0)}
+                    {formatCurrency(calcularTotal(vendaSelecionada.items))}
                   </span>
                 </div>
+                <button
+                  onClick={() => setShowModalFecharVenda(true)}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    background: "#10b981",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  Finalizar Venda
+                </button>
               </div>
-            </div>
-          ))
+            )}
+          </>
+        ) : (
+          <>
+            <TabelaComandas
+              vendas={vendas}
+              pontosVenda={pontosVenda}
+              vendaSelecionada={vendaSelecionada}
+              onVendaClick={setVendaSelecionada}
+              isMobile={true}
+              formatCurrency={formatCurrency}
+            />
+            <DetalhesVenda
+              venda={vendaSelecionada}
+              pontosVenda={pontosVenda}
+              onRemoverItem={removerItem}
+              onFinalizarVenda={() => setShowModalFecharVenda(true)}
+              formatCurrency={formatCurrency}
+              isMobile={true}
+            />
+          </>
         )}
       </div>
 
-      {vendaSelecionada && vendaSelecionada.status === "aberto" && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: "#fff",
-            borderTop: "1px solid #e5e7eb",
-            padding: "16px",
-            boxShadow: "0 -2px 10px rgba(0,0,0,0.1)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: 8,
-            }}
-          >
-            <span>{vendaSelecionada.customer_name}</span>
-            <span
-              style={{ fontWeight: "bold", color: "#059669", fontSize: 18 }}
-            >
-              {formatCurrency(calcularTotal(vendaSelecionada.items))}
-            </span>
-          </div>
-          <button
-            onClick={() => setShowModalFecharVenda(true)}
-            style={{
-              width: "100%",
-              padding: "10px",
-              background: "#10b981",
-              color: "#fff",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            Finalizar Venda
-          </button>
-        </div>
-      )}
-
+      {/* Modals */}
       {showModalNovaVenda && <ModalNovaVenda />}
-      {showModalFecharVenda && <ModalFinalizarVenda />}
+      {showModalFecharVenda && (
+        <ModalFinalizarVenda
+          isOpen={showModalFecharVenda}
+          venda={vendaSelecionada}
+          onClose={() => {
+            setShowModalFecharVenda(false);
+            setFormaPagamento("");
+          }}
+          onConfirm={async (formaPagamento, valorRecebido) => {
+            if (!vendaSelecionada) return;
+
+            try {
+              const response = await fetch(
+                `http://localhost:8000/api/orders/${vendaSelecionada.id}/close`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                  },
+                  body: JSON.stringify({
+                    payment_method: formaPagamento,
+                  }),
+                },
+              );
+
+              if (!response.ok) {
+                const error = await response.json();
+                alert(error.message || "Erro ao finalizar venda");
+                return;
+              }
+
+              setVendaSelecionada(null);
+              await fetchVendas();
+              setShowModalFecharVenda(false);
+              alert("Venda finalizada com sucesso!");
+            } catch (error) {
+              console.error("Erro ao finalizar venda:", error);
+              alert("Erro ao conectar com o servidor");
+            }
+          }}
+          formatCurrency={formatCurrency}
+        />
+      )}
     </div>
   );
 }
