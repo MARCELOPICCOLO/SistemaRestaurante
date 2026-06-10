@@ -7,58 +7,34 @@ import {
   faTrash,
   faUser,
   faUsers,
-  faTimes,
-  faExclamationTriangle,
+  faEllipsisV,
 } from "@fortawesome/free-solid-svg-icons";
 
-interface Mesa {
+interface PontoVenda {
   id: number;
   number: number;
   restaurant_id: number;
 }
 
 interface SidebarPdvProps {
-  mesas: Mesa[];
-  mesaAtual: string;
-  novaMesa: string;
-  onNovaMesaChange: (value: string) => void;
-  onAdicionarMesa: () => void;
-  onMesaClick: (mesa: string) => void;
-  onExcluirMesa: (mesaId: number, mesaNumero: number) => void;
+  pontos: PontoVenda[];
+  pontoAtual: string;
+  novoPontoCodigo: string;
+  onNovoPontoCodigoChange: (value: string) => void;
+  onAdicionarPonto: () => void;
+  onPontoClick: (ponto: string, comandasDoPonto: any[]) => void;
+  onMenuClick: (event: React.MouseEvent<HTMLDivElement>, ponto: string) => void;
 }
 
 const SidebarPdv: React.FC<SidebarPdvProps> = ({
-  mesas,
-  mesaAtual,
-  novaMesa,
-  onNovaMesaChange,
-  onAdicionarMesa,
-  onMesaClick,
-  onExcluirMesa,
+  pontos,
+  pontoAtual,
+  novoPontoCodigo,
+  onNovoPontoCodigoChange,
+  onAdicionarPonto,
+  onPontoClick,
+  onMenuClick,
 }) => {
-  const [modalExcluir, setModalExcluir] = useState<{
-    id: number;
-    numero: number;
-    nome: string;
-  } | null>(null);
-
-  const handleExcluirClick = (
-    e: React.MouseEvent,
-    mesaId: number,
-    mesaNumero: number,
-    mesaNome: string,
-  ) => {
-    e.stopPropagation();
-    setModalExcluir({ id: mesaId, numero: mesaNumero, nome: mesaNome });
-  };
-
-  const confirmarExclusao = () => {
-    if (modalExcluir) {
-      onExcluirMesa(modalExcluir.id, modalExcluir.numero);
-      setModalExcluir(null);
-    }
-  };
-
   return (
     <div
       style={{
@@ -103,9 +79,7 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
                 fontWeight: 600,
                 color: "#fff",
               }}
-            >
-              Pontos de Venda
-            </h2>
+            ></h2>
             <p style={{ margin: "2px 0 0", fontSize: 11, color: "#9ca3af" }}>
               Gerencie seus pontos
             </p>
@@ -126,8 +100,8 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
           >
             <input
               type="number"
-              value={novaMesa}
-              onChange={(e) => onNovaMesaChange(e.target.value)}
+              value={novoPontoCodigo}
+              onChange={(e) => onNovoPontoCodigoChange(e.target.value)}
               placeholder="Número"
               style={{
                 width: "100px",
@@ -139,10 +113,10 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
                 background: "#374151",
                 color: "#fff",
               }}
-              onKeyPress={(e) => e.key === "Enter" && onAdicionarMesa()}
+              onKeyPress={(e) => e.key === "Enter" && onAdicionarPonto()}
             />
             <button
-              onClick={onAdicionarMesa}
+              onClick={onAdicionarPonto}
               style={{
                 padding: "6px 14px",
                 borderRadius: 6,
@@ -180,16 +154,16 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
             gap: 12,
           }}
         >
-          {mesas
+          {pontos
             .sort((a, b) => a.number - b.number)
-            .map((mesa) => {
-              const isActive = mesaAtual === `mesa-${mesa.number}`;
-              const isBalcao = mesa.number === 0;
+            .map((ponto) => {
+              const isActive = pontoAtual === `ponto-${ponto.number}`;
+              const isBalcao = ponto.number === 0;
 
               return (
                 <div
-                  key={mesa.id}
-                  onClick={() => onMesaClick(`mesa-${mesa.number}`)}
+                  key={ponto.id}
+                  onClick={() => onPontoClick(`ponto-${ponto.number}`, [])}
                   style={{
                     position: "relative",
                     background: isBalcao
@@ -253,7 +227,7 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
                   >
                     {isBalcao
                       ? "Balcão"
-                      : `Ponto ${mesa.number.toString().padStart(2, "0")}`}
+                      : `Ponto ${ponto.number.toString().padStart(2, "0")}`}
                   </div>
 
                   <div
@@ -265,17 +239,10 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
                     {isBalcao ? "Atendimento geral" : "Ponto de venda"}
                   </div>
 
-                  {/* Botão de excluir com lixeira (apenas para não balcão) */}
+                  {/* Botão de menu (3 pontinhos) */}
                   {!isBalcao && (
                     <div
-                      onClick={(e) =>
-                        handleExcluirClick(
-                          e,
-                          mesa.id,
-                          mesa.number,
-                          `Ponto ${mesa.number}`,
-                        )
-                      }
+                      onClick={(e) => onMenuClick(e, `ponto-${ponto.number}`)}
                       style={{
                         position: "absolute",
                         bottom: 6,
@@ -291,14 +258,14 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
                         transition: "all 0.2s",
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#dc2626";
+                        e.currentTarget.style.background = "#10b981";
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = "rgba(0,0,0,0.6)";
                       }}
                     >
                       <FontAwesomeIcon
-                        icon={faTrash}
+                        icon={faEllipsisV}
                         style={{ fontSize: 10, color: "#fff" }}
                       />
                     </div>
@@ -318,124 +285,9 @@ const SidebarPdv: React.FC<SidebarPdvProps> = ({
         }}
       >
         <div style={{ fontSize: 10, color: "#9ca3af", textAlign: "center" }}>
-          Total: {mesas.length} pontos
+          Total: {pontos.length} pontos
         </div>
       </div>
-
-      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
-      {modalExcluir && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 2000,
-          }}
-          onClick={() => setModalExcluir(null)}
-        >
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              width: "90%",
-              maxWidth: 400,
-              overflow: "hidden",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Cabeçalho do Modal */}
-            <div
-              style={{
-                padding: "20px",
-                background: "#ef4444",
-                color: "#fff",
-                textAlign: "center",
-              }}
-            >
-              <FontAwesomeIcon
-                icon={faExclamationTriangle}
-                style={{ fontSize: 32, marginBottom: 12 }}
-              />
-              <h3 style={{ margin: 0, fontSize: 18 }}>Confirmar Exclusão</h3>
-            </div>
-
-            {/* Corpo do Modal */}
-            <div style={{ padding: "24px" }}>
-              <p
-                style={{ margin: "0 0 8px 0", fontSize: 14, color: "#374151" }}
-              >
-                Tem certeza que deseja excluir o{" "}
-                <strong>{modalExcluir.nome}</strong>?
-              </p>
-              <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
-                Esta ação não poderá ser desfeita e todos os dados relacionados
-                serão removidos.
-              </p>
-            </div>
-
-            {/* Botões do Modal */}
-            <div
-              style={{
-                padding: "16px 24px",
-                borderTop: "1px solid #e5e7eb",
-                display: "flex",
-                gap: 12,
-                justifyContent: "flex-end",
-              }}
-            >
-              <button
-                onClick={() => setModalExcluir(null)}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 6,
-                  border: "1px solid #e5e7eb",
-                  background: "#fff",
-                  color: "#374151",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  transition: "all 0.2s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#f9fafb";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "#fff";
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmarExclusao}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: "#ef4444",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  transition: "all 0.2s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#dc2626";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "#ef4444";
-                }}
-              >
-                <FontAwesomeIcon icon={faTrash} style={{ marginRight: 6 }} />
-                Excluir
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

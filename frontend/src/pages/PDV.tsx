@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import TabelaProdutosPdv from "../../components/TabelaProdutosPdv";
 import SidebarPdv from "../../components/SidebarPdv";
 import PontoAtendimentoMobile from "../../components/PontoAtendimentoMobile";
+import { ModalAbrirComanda } from "../../components/ModalAbrirComanda";
 
 interface Produto {
   id: number;
@@ -41,6 +42,7 @@ interface Order {
   table_id: number;
   customer_name: string;
   status: string;
+  closed_at?: string;
   items?: OrderItem[];
 }
 
@@ -78,7 +80,6 @@ export default function PDV() {
   const [modalAbrirComanda, setModalAbrirComanda] = useState<string | null>(
     null,
   );
-  const [nomeComanda, setNomeComanda] = useState("");
   const [showSelectComanda, setShowSelectComanda] = useState(false);
   const [produtoPendente, setProdutoPendente] = useState<Produto | null>(null);
 
@@ -132,7 +133,7 @@ export default function PDV() {
 
         // Inicializar array vazio para cada ponto
         tablesData.forEach((t: PontoVenda) => {
-          comandasEstruturadas[t.number] = [];
+          comandasEstruturadas[`ponto-${t.number}`] = [];
         });
 
         // Para cada comanda aberta, adicionar ao seu ponto correspondente
@@ -304,7 +305,11 @@ export default function PDV() {
     return comandas[pontoNome] || [];
   };
 
-  const abrirComanda = async (pontoNome: string, nomeCliente: string) => {
+  const abrirComanda = async (
+    pontoNome: string,
+    nomeCliente: string,
+    dataComanda: string,
+  ) => {
     const ponto = pontosVenda.find((p) => `ponto-${p.number}` === pontoNome);
     if (!ponto) return;
 
@@ -324,6 +329,7 @@ export default function PDV() {
           restaurant_id: 1,
           table_id: ponto.id,
           customer_name: nomeCliente,
+          closed_at: dataComanda,
         }),
       });
 
@@ -347,7 +353,6 @@ export default function PDV() {
 
       alert(`Atendimento de ${nomeCliente} aberto no ponto ${ponto.number}!`);
       setModalAbrirComanda(null);
-      setNomeComanda("");
       setMenuPonto(null);
 
       if (isMobile) {
@@ -659,7 +664,8 @@ export default function PDV() {
       setComandaSelecionada(comandaAberta.orderId);
       alert("Atendimento de balcão já está aberto! Adicione os itens.");
     } else {
-      await abrirComanda(pontoNome, "Balcão");
+      const hoje = new Date().toISOString().split("T")[0];
+      await abrirComanda(pontoNome, "Balcão", hoje);
     }
 
     if (isMobile) {
@@ -670,6 +676,8 @@ export default function PDV() {
   const abrirComandaBalcao = async (pontoNome: string) => {
     const ponto = pontosVenda.find((p) => `ponto-${p.number}` === pontoNome);
     if (!ponto) return;
+
+    const hoje = new Date().toISOString().split("T")[0];
 
     try {
       const response = await fetch("http://localhost:8000/api/orders", {
@@ -682,6 +690,7 @@ export default function PDV() {
           restaurant_id: 1,
           table_id: ponto.id,
           customer_name: "Balcão",
+          closed_at: hoje,
         }),
       });
 
@@ -726,117 +735,6 @@ export default function PDV() {
   );
 
   const comandasDoPontoAtual = comandas[pontoAtual] || [];
-
-  const ModalAbrirComanda = ({
-    pontoNome,
-    onClose,
-  }: {
-    pontoNome: string;
-    onClose: () => void;
-  }) => {
-    const numeroPonto = pontoNome?.replace("ponto-", "");
-
-    return (
-      <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: "rgba(0,0,0,0.5)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 1000,
-        }}
-        onClick={onClose}
-      >
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 24,
-            width: "90%",
-            maxWidth: 400,
-            boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <h2 style={{ margin: 0, fontSize: 24 }}>Abrir Atendimento</h2>
-            <p style={{ margin: "8px 0 0", color: "#6b7280" }}>
-              Ponto {numeroPonto}
-            </p>
-          </div>
-
-          <div style={{ marginBottom: 20 }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: 8,
-                fontSize: 14,
-                fontWeight: 500,
-              }}
-            >
-              Nome do cliente:
-            </label>
-            <input
-              type="text"
-              value={nomeComanda}
-              onChange={(e) => setNomeComanda(e.target.value)}
-              placeholder="Ex: João, Maria, Família Silva..."
-              autoFocus
-              style={{
-                width: "100%",
-                padding: "10px",
-                borderRadius: 8,
-                border: "1px solid #e5e7eb",
-                fontSize: 14,
-                outline: "none",
-              }}
-              onKeyPress={(e) =>
-                e.key === "Enter" && abrirComanda(pontoNome, nomeComanda)
-              }
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 12 }}>
-            <button
-              onClick={onClose}
-              style={{
-                flex: 1,
-                padding: "10px",
-                borderRadius: 8,
-                border: "1px solid #e5e7eb",
-                background: "#fff",
-                color: "#374151",
-                fontWeight: "bold",
-                cursor: "pointer",
-              }}
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={() => abrirComanda(pontoNome, nomeComanda)}
-              style={{
-                flex: 1,
-                padding: "10px",
-                borderRadius: 8,
-                border: "none",
-                background: "#10b981",
-                color: "#fff",
-                fontWeight: "bold",
-                cursor: "pointer",
-              }}
-            >
-              Abrir
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const ModalSelectComanda = ({ onClose }: { onClose: () => void }) => {
     return (
@@ -1344,14 +1242,12 @@ export default function PDV() {
     </div>
   );
 
-  const handlePontoClick = async (
-    ponto: string,
-    comandasDoPonto: Comanda[],
-  ) => {
+  const handlePontoClick = async (ponto: string) => {
     const pontoObj = pontosVenda.find((p) => `ponto-${p.number}` === ponto);
     const isBalcao = pontoObj?.number === 0;
 
     if (isBalcao) {
+      const comandasDoPonto = comandas[ponto] || [];
       const comandaAberta = comandasDoPonto.find((c) => {
         const order = orders.find((o) => o.id === c.orderId);
         return order && order.status === "aberto";
@@ -1365,6 +1261,7 @@ export default function PDV() {
       }
     } else {
       setPontoAtual(ponto);
+      const comandasDoPonto = comandas[ponto] || [];
       setComandaSelecionada(
         comandasDoPonto.length > 0 ? comandasDoPonto[0].orderId : null,
       );
@@ -1571,8 +1468,6 @@ export default function PDV() {
         >
           <SidebarPdv
             pontos={pontosVenda}
-            comandas={comandas}
-            orders={orders}
             pontoAtual={pontoAtual}
             novoPontoCodigo={novoPontoCodigo}
             onNovoPontoCodigoChange={setNovoPontoCodigo}
@@ -1799,12 +1694,13 @@ export default function PDV() {
       )}
 
       {/* Modals */}
-      {modalAbrirComanda && (
-        <ModalAbrirComanda
-          pontoNome={modalAbrirComanda}
-          onClose={() => setModalAbrirComanda(null)}
-        />
-      )}
+      <ModalAbrirComanda
+        showModal={!!modalAbrirComanda}
+        pontoNome={modalAbrirComanda || ""}
+        onClose={() => setModalAbrirComanda(null)}
+        onConfirm={abrirComanda}
+      />
+
       {showSelectComanda && (
         <ModalSelectComanda
           onClose={() => {

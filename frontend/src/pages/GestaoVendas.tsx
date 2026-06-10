@@ -6,15 +6,13 @@ import TabelaProdutosPdv from "../../components/TabelaProdutosPdv";
 import { DetalhesVenda } from "../../components/DetalheVenda";
 import { TabelaComandas } from "../../components/TabelaComandas";
 import { ModalFinalizarVenda } from "../../components/ModalFinalizarVenda";
+import { ModalAbrirComanda } from "../../components/ModalAbrirComanda";
 
 import {
   faArrowLeft,
   faPlus,
   faTimes,
   faCashRegister,
-  faCheck,
-  faTrash,
-  faShoppingCart,
   faBars,
   faBoxes,
   faClipboardList,
@@ -59,11 +57,13 @@ interface VendaItem {
 
 interface Venda {
   id: number;
+  order_number?: string;
   customer_name: string;
   status: string;
   total?: number;
   items?: VendaItem[];
   created_at?: string;
+  closed_at?: string;
   table_id?: number;
 }
 
@@ -85,12 +85,7 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
   const [vendas, setVendas] = useState<Venda[]>([]);
   const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
   const [showModalNovaVenda, setShowModalNovaVenda] = useState(false);
-  const [pontoSelecionado, setPontoSelecionado] = useState<number>(0);
-  const [novoCliente, setNovoCliente] = useState("");
   const [showModalFecharVenda, setShowModalFecharVenda] = useState(false);
-  const [formaPagamento, setFormaPagamento] = useState("");
-  const [valorRecebido, setValorRecebido] = useState("");
-  const [troco, setTroco] = useState(0);
 
   // Detectar mobile
   useEffect(() => {
@@ -109,9 +104,6 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
       );
       const data = await response.json();
       setPontosVenda(data);
-      if (data.length > 0) {
-        setPontoSelecionado(data[0].id);
-      }
     } catch (error) {
       console.error("Erro ao buscar pontos de venda:", error);
     }
@@ -178,14 +170,22 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
     fetchVendas();
   }, [fetchProdutos, fetchVendas, fetchPontosVenda]);
 
-  // Abrir nova venda
-  const abrirVenda = async () => {
-    if (!pontoSelecionado) {
-      alert("Selecione um ponto de venda");
-      return;
-    }
-
+  // Abrir nova venda com ModalAbrirComanda - CORRIGIDO
+  const abrirVenda = async (
+    numeroComanda: number,
+    nomeCliente: string,
+    dataComanda: string,
+  ) => {
     try {
+      console.log("=== ENVIANDO PARA API ===");
+      console.log({
+        restaurant_id: 1,
+        order_number: String(numeroComanda),
+        order_date: dataComanda, // 👈 CORRETO: order_date
+        customer_name: nomeCliente.trim(),
+        status: "aberto",
+      });
+
       const response = await fetch("http://localhost:8000/api/orders", {
         method: "POST",
         headers: {
@@ -194,16 +194,17 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
         },
         body: JSON.stringify({
           restaurant_id: 1,
-          table_id: pontoSelecionado,
-          customer_name:
-            novoCliente.trim() || `Cliente ${new Date().toLocaleTimeString()}`,
+          order_number: String(numeroComanda),
+          order_date: dataComanda, // 👈 CAMPO CORRETO
+          customer_name: nomeCliente.trim(),
           status: "aberto",
+          // closed_at NÃO DEVE SER ENVIADO
         }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        alert(error.message || "Erro ao abrir venda");
+        alert(error.message || "Erro ao abrir comanda");
         return;
       }
       const data = await response.json();
@@ -211,10 +212,9 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
       await fetchVendas();
       setVendaSelecionada(novaVenda);
       setShowModalNovaVenda(false);
-      setNovoCliente("");
-      alert("Venda iniciada com sucesso!");
+      alert(`Comanda #${numeroComanda} - ${nomeCliente} aberta com sucesso!`);
     } catch (error) {
-      console.error("Erro ao abrir venda:", error);
+      console.error("Erro ao abrir comanda:", error);
       alert("Erro ao conectar com o servidor");
     }
   };
@@ -304,69 +304,20 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
         `http://localhost:8000/api/orders/${vendaId}`,
       );
       const updatedVenda = await updatedResponse.json();
-      setVendaSelecionada({
-        ...updatedVenda,
-        total:
-          updatedVenda.items?.reduce(
-            (sum: number, item: any) =>
-              sum + Number(item.price) * item.quantity,
-            0,
-          ) || 0,
-      });
+      if (vendaSelecionada?.id === vendaId) {
+        setVendaSelecionada({
+          ...updatedVenda,
+          total:
+            updatedVenda.items?.reduce(
+              (sum: number, item: any) =>
+                sum + Number(item.price) * item.quantity,
+              0,
+            ) || 0,
+        });
+      }
       alert("Item removido!");
     } catch (error) {
       console.error("Erro ao remover item:", error);
-      alert("Erro ao conectar com o servidor");
-    }
-  };
-
-  // Finalizar venda
-  const finalizarVenda = async () => {
-    if (!vendaSelecionada) return;
-    if (!formaPagamento) {
-      alert("Selecione uma forma de pagamento");
-      return;
-    }
-
-    if (formaPagamento === "dinheiro") {
-      const total = calcularTotal(vendaSelecionada?.items);
-      const recebido = parseFloat(valorRecebido) || 0;
-      if (recebido < total) {
-        alert(`Valor insuficiente. Total da venda: ${formatCurrency(total)}`);
-        return;
-      }
-    }
-
-    try {
-      const response = await fetch(
-        `http://localhost:8000/api/orders/${vendaSelecionada.id}/close`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            payment_method: formaPagamento,
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        const error = await response.json();
-        alert(error.message || "Erro ao finalizar venda");
-        return;
-      }
-
-      setVendaSelecionada(null);
-      await fetchVendas();
-      setShowModalFecharVenda(false);
-      setFormaPagamento("");
-      setValorRecebido("");
-      setTroco(0);
-      alert("Venda finalizada com sucesso!");
-    } catch (error) {
-      console.error("Erro ao finalizar venda:", error);
       alert("Erro ao conectar com o servidor");
     }
   };
@@ -384,150 +335,74 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
     );
   };
 
+  // Cancelar venda
+  const cancelarVenda = async (vendaId: number) => {
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/orders/${vendaId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.message || "Erro ao cancelar venda");
+        return;
+      }
+
+      if (vendaSelecionada?.id === vendaId) {
+        setVendaSelecionada(null);
+      }
+      await fetchVendas();
+      alert("Venda cancelada com sucesso!");
+    } catch (error) {
+      console.error("Erro ao cancelar venda:", error);
+      alert("Erro ao conectar com o servidor");
+    }
+  };
+
+  // Marcar venda como não paga
+  const marcarNaoPaga = async (vendaId: number) => {
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/orders/${vendaId}/close`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            payment_method: "pendente",
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.message || "Erro ao marcar venda como não paga");
+        return;
+      }
+
+      await fetchVendas();
+      const updatedResponse = await fetch(
+        `http://localhost:8000/api/orders/${vendaId}`,
+      );
+      const updatedVenda = await updatedResponse.json();
+      setVendaSelecionada(updatedVenda);
+      alert("Venda marcada como não paga!");
+    } catch (error) {
+      console.error("Erro ao marcar venda:", error);
+      alert("Erro ao conectar com o servidor");
+    }
+  };
+
   const vendasAbertas = vendas.filter((v) => v.status === "aberto");
-
-  // Modal Nova Venda
-  const ModalNovaVenda = () => (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-      onClick={() => setShowModalNovaVenda(false)}
-    >
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          padding: 24,
-          width: "90%",
-          maxWidth: 450,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 20,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: 20 }}>Nova Venda</h2>
-          <button
-            onClick={() => setShowModalNovaVenda(false)}
-            style={{
-              background: "none",
-              border: "none",
-              fontSize: 20,
-              cursor: "pointer",
-              color: "#6b7280",
-            }}
-          >
-            <FontAwesomeIcon icon={faTimes} />
-          </button>
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Ponto de Venda <span style={{ color: "#dc2626" }}>*</span>
-          </label>
-          <select
-            value={pontoSelecionado}
-            onChange={(e) => setPontoSelecionado(Number(e.target.value))}
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-          >
-            {pontosVenda.map((ponto) => (
-              <option key={ponto.id} value={ponto.id}>
-                {ponto.number === 0
-                  ? "Balcão"
-                  : `Ponto ${ponto.number.toString().padStart(2, "0")}`}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label
-            style={{
-              display: "block",
-              marginBottom: 8,
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Nome do Cliente <span style={{ color: "#9ca3af" }}>(opcional)</span>
-          </label>
-          <input
-            type="text"
-            value={novoCliente}
-            onChange={(e) => setNovoCliente(e.target.value)}
-            placeholder="Ex: João Silva"
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              fontSize: 14,
-            }}
-            autoFocus
-          />
-        </div>
-
-        <div style={{ display: "flex", gap: 12 }}>
-          <button
-            onClick={() => setShowModalNovaVenda(false)}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={abrirVenda}
-            style={{
-              flex: 1,
-              padding: "10px",
-              borderRadius: 8,
-              border: "none",
-              background: "#10b981",
-              color: "#fff",
-              cursor: "pointer",
-              fontWeight: 500,
-            }}
-          >
-            Iniciar Venda
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   // Versão Desktop
   if (!isMobile) {
@@ -586,18 +461,26 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
             pontosVenda={pontosVenda}
             onRemoverItem={removerItem}
             onFinalizarVenda={() => setShowModalFecharVenda(true)}
+            onCancelarVenda={cancelarVenda}
+            onMarcarNaoPaga={marcarNaoPaga}
             formatCurrency={formatCurrency}
             isMobile={false}
           />
         </div>
-        {showModalNovaVenda && <ModalNovaVenda />}
+
+        {/* Modal usando o componente ModalAbrirComanda */}
+        <ModalAbrirComanda
+          showModal={showModalNovaVenda}
+          onClose={() => setShowModalNovaVenda(false)}
+          onConfirm={abrirVenda}
+        />
+
         {showModalFecharVenda && (
           <ModalFinalizarVenda
             isOpen={showModalFecharVenda}
             venda={vendaSelecionada}
             onClose={() => {
               setShowModalFecharVenda(false);
-              setFormaPagamento("");
             }}
             onConfirm={async (formaPagamento, valorRecebido) => {
               if (!vendaSelecionada) return;
@@ -915,6 +798,8 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
               pontosVenda={pontosVenda}
               onRemoverItem={removerItem}
               onFinalizarVenda={() => setShowModalFecharVenda(true)}
+              onCancelarVenda={cancelarVenda}
+              onMarcarNaoPaga={marcarNaoPaga}
               formatCurrency={formatCurrency}
               isMobile={true}
             />
@@ -922,15 +807,19 @@ export default function GestaoVendas({ setTela }: GestaoVendasProps) {
         )}
       </div>
 
-      {/* Modals */}
-      {showModalNovaVenda && <ModalNovaVenda />}
+      {/* Modal usando o componente ModalAbrirComanda */}
+      <ModalAbrirComanda
+        showModal={showModalNovaVenda}
+        onClose={() => setShowModalNovaVenda(false)}
+        onConfirm={abrirVenda}
+      />
+
       {showModalFecharVenda && (
         <ModalFinalizarVenda
           isOpen={showModalFecharVenda}
           venda={vendaSelecionada}
           onClose={() => {
             setShowModalFecharVenda(false);
-            setFormaPagamento("");
           }}
           onConfirm={async (formaPagamento, valorRecebido) => {
             if (!vendaSelecionada) return;

@@ -42,15 +42,15 @@ export default function Dashboard({ setTela }: DashboardProps) {
   }, []);
 
   const cards: CardProps[] = [
-    {
-      id: "pontos_venda",
-      titulo: "Gestão de Pontos de Venda",
-      descricao:
-        "Gerencie seus pontos de atendimento, caixas e terminais de venda",
-      icon: faStore,
-      cor: "#10b981",
-      tela: "gestao_pontos",
-    },
+    // {
+    //   id: "pontos_venda",
+    //   titulo: "Gestão de Pontos de Venda",
+    //   descricao:
+    //     "Gerencie seus pontos de atendimento, caixas e terminais de venda",
+    //   icon: faStore,
+    //   cor: "#10b981",
+    //   tela: "gestao_pontos",
+    // },
     {
       id: "estoque",
       titulo: "Gestão de Estoque",
