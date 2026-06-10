@@ -44,13 +44,14 @@ class OrderController extends Controller
         }
     }
 
-    // ➕ CRIAR COMANDA (ou importar venda)
+    // ➕ CRIAR COMANDA
     public function store(Request $request)
     {
         try {
             $data = $request->validate([
                 'restaurant_id' => 'required|exists:restaurants,id',
-                'table_id'      => 'required|exists:tables,id',
+                'order_number'  => 'nullable|string|max:20',
+                'order_date'    => 'nullable|date',
                 'customer_name' => 'nullable|string|max:100',
                 'status'        => 'nullable|string|in:aberto,fechado,pendente,cancelado',
                 'total'         => 'nullable|numeric|min:0',
@@ -58,33 +59,40 @@ class OrderController extends Controller
                 'closed_at'     => 'nullable|date',
             ]);
 
-            $table = \App\Models\Table::where('id', $data['table_id'])
-                ->where('restaurant_id', $data['restaurant_id'])
-                ->first();
+            // Gerar número da comanda automaticamente se não for informado
+            $orderNumber = $data['order_number'] ?? $this->generateOrderNumber();
 
-            if (!$table) {
-                return response()->json(['message' => 'Mesa não pertence ao restaurante'], 400);
+            // Validar se o número da comanda já existe
+            if (Order::where('order_number', $orderNumber)
+                ->where('restaurant_id', $data['restaurant_id'])
+                ->exists()
+            ) {
+                $orderNumber = $this->generateOrderNumber(true);
             }
 
             // Define valores padrão
-            $status = $data['status'] ?? 'fechado';
+            $status = $data['status'] ?? 'aberto';
             $total = $data['total'] ?? 0;
-            $customerName = $data['customer_name'] ?? 'Cliente Importado';
+            $customerName = $data['customer_name'] ?? 'Cliente';
             $paymentMethod = $data['payment_method'] ?? null;
-            $closedAt = $data['closed_at'] ?? ($status === 'fechado' ? now() : null);
+
+            // Usar order_date se informado, senão usar a data atual
+            $orderDate = $data['order_date'] ?? now()->format('Y-m-d');
 
             $order = Order::create([
-                'restaurant_id' => $data['restaurant_id'],
-                'table_id'      => $data['table_id'],
-                'customer_name' => $customerName,
-                'status'        => $status,
-                'total'         => $total,
-                'payment_method' => $paymentMethod,
-                'closed_at'     => $closedAt,
+                'restaurant_id'   => $data['restaurant_id'],
+                'order_number'    => $orderNumber,
+                'order_date'      => $orderDate,
+                'table_id'        => null,
+                'customer_name'   => $customerName,
+                'status'          => $status,
+                'total'           => $total,
+                'payment_method'  => $paymentMethod,
+                'closed_at'       => null, // Só preenche ao finalizar
             ]);
 
             return response()->json([
-                'message' => 'Venda importada com sucesso',
+                'message' => 'Comanda criada com sucesso',
                 'order' => $order
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -93,15 +101,70 @@ class OrderController extends Controller
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            \Log::error('Erro ao criar venda: ' . $e->getMessage());
+            \Log::error('Erro ao criar comanda: ' . $e->getMessage());
             return response()->json([
-                'message' => 'Erro ao criar venda',
+                'message' => 'Erro ao criar comanda',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
 
-    // 🍟 ADICIONAR ITEM (CORRIGIDO - SEMPRE CRIA NOVO ITEM)
+    // ✏️ ATUALIZAR COMANDA
+    public function update(Request $request, $id)
+    {
+        try {
+            $order = Order::findOrFail($id);
+
+            $data = $request->validate([
+                'order_number'  => 'nullable|string|max:20',
+                'order_date'    => 'nullable|date',
+                'customer_name' => 'nullable|string|max:100',
+                'status'        => 'nullable|string|in:aberto,fechado,pendente,cancelado',
+                'total'         => 'nullable|numeric|min:0',
+                'payment_method' => 'nullable|string|in:dinheiro,pix,credito,debito,pendente',
+                'closed_at'     => 'nullable|date',
+            ]);
+
+            $order->update($data);
+
+            return response()->json([
+                'message' => 'Comanda atualizada com sucesso',
+                'order' => $order
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Erro ao atualizar comanda: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Erro ao atualizar comanda',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // 🔢 Gerar número automático da comanda
+    private function generateOrderNumber($forceUnique = false)
+    {
+        $prefix = date('ymd');
+        $lastOrder = Order::where('order_number', 'LIKE', "{$prefix}%")
+            ->orderBy('order_number', 'desc')
+            ->first();
+
+        if ($lastOrder && $lastOrder->order_number) {
+            $lastNumber = intval(substr($lastOrder->order_number, -4));
+            $newNumber = str_pad($lastNumber + 1, 4, '0', STR_PAD_LEFT);
+        } else {
+            $newNumber = '0001';
+        }
+
+        $orderNumber = "{$prefix}{$newNumber}";
+
+        if ($forceUnique && Order::where('order_number', $orderNumber)->exists()) {
+            return $this->generateOrderNumber(true);
+        }
+
+        return $orderNumber;
+    }
+
+    // 🍟 ADICIONAR ITEM
     public function addItem(Request $request, $orderId)
     {
         try {
@@ -113,20 +176,15 @@ class OrderController extends Controller
 
             $order = Order::findOrFail($orderId);
 
-            // Verificar se a ordem está aberta
             if ($order->status !== 'aberto') {
                 return response()->json(['message' => 'Esta venda já foi finalizada'], 400);
             }
-
-            // SEMPRE CRIAR UM NOVO ITEM - NÃO AGRUPAR
-            // Comente ou remova TODO o código que verifica se o produto já existe
 
             $orderItem = new OrderItem();
             $orderItem->order_id = $order->id;
             $orderItem->product_id = $request->product_id;
             $orderItem->quantity = $request->quantity ?? 1;
 
-            // Usar o preço personalizado se fornecido, senão pegar do produto
             if ($request->has('price') && $request->price > 0) {
                 $orderItem->price = $request->price;
             } else {
@@ -136,11 +194,9 @@ class OrderController extends Controller
 
             $orderItem->save();
 
-            // Atualizar o total da ordem
             $order->total = $order->items()->sum(\DB::raw('price * quantity'));
             $order->save();
 
-            // Retornar o item recém-criado com o produto carregado
             $orderItem->load('product');
 
             return response()->json([
@@ -160,6 +216,7 @@ class OrderController extends Controller
             ], 500);
         }
     }
+
     // 📋 LISTAR ITENS DA COMANDA
     public function getItems($orderId)
     {
@@ -177,7 +234,7 @@ class OrderController extends Controller
         }
     }
 
-    // ✏️ ATUALIZAR QUANTIDADE
+    // ✏️ ATUALIZAR QUANTIDADE DO ITEM
     public function updateItem(Request $request, $itemId)
     {
         try {
@@ -186,6 +243,11 @@ class OrderController extends Controller
             ]);
 
             $item = OrderItem::findOrFail($itemId);
+
+            if ($item->order->status !== 'aberto') {
+                return response()->json(['message' => 'Esta venda já foi finalizada'], 400);
+            }
+
             $item->update(['quantity' => $data['quantity']]);
 
             $this->updateTotal($item->order);
@@ -208,6 +270,11 @@ class OrderController extends Controller
         try {
             $item = OrderItem::findOrFail($itemId);
             $order = $item->order;
+
+            if ($order->status !== 'aberto') {
+                return response()->json(['message' => 'Esta venda já foi finalizada'], 400);
+            }
+
             $item->delete();
             $this->updateTotal($order);
 
@@ -222,8 +289,7 @@ class OrderController extends Controller
         }
     }
 
-    // 💰 FECHAR COMANDA (COM FORMA DE PAGAMENTO)
-
+    // 💰 FECHAR COMANDA (CORRIGIDO)
     public function close(Request $request, $id)
     {
         try {
@@ -245,9 +311,12 @@ class OrderController extends Controller
                 ? 'pendente'
                 : 'fechado';
 
+            // 👈 CORRETO: closed_at recebe a data da comanda (order_date)
+            $closedAt = $order->order_date;
+
             $order->update([
                 'status' => $status,
-                'closed_at' => now(),
+                'closed_at' => $closedAt,
                 'payment_method' => $data['payment_method'] ?? null,
                 'total' => $data['total'] ?? $order->total
             ]);
@@ -256,22 +325,29 @@ class OrderController extends Controller
                 'message' => $status === 'pendente'
                     ? 'Comanda marcada como não paga'
                     : 'Comanda finalizada com sucesso',
-
                 'order' => $order
             ]);
         } catch (\Exception $e) {
-
+            \Log::error('Erro ao finalizar comanda: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Erro ao finalizar comanda',
                 'error' => $e->getMessage()
             ], 500);
         }
     }
+
     // ❌ CANCELAR COMANDA
     public function destroy($id)
     {
         try {
             $order = Order::findOrFail($id);
+
+            if ($order->status === 'cancelado') {
+                return response()->json([
+                    'message' => 'Comanda já está cancelada'
+                ], 400);
+            }
+
             $order->update(['status' => 'cancelado']);
 
             return response()->json([
@@ -285,20 +361,24 @@ class OrderController extends Controller
         }
     }
 
-    // 📊 COMANDAS POR MESA
-    public function getByTable($tableId)
+    // 📊 BUSCAR COMANDA POR NÚMERO
+    public function getByOrderNumber($orderNumber)
     {
         try {
-            $orders = Order::where('table_id', $tableId)
-                ->where('status', 'aberto')
+            $order = Order::where('order_number', $orderNumber)
                 ->with('items.product')
-                ->orderBy('created_at', 'asc')
-                ->get();
+                ->first();
 
-            return response()->json($orders);
+            if (!$order) {
+                return response()->json([
+                    'message' => 'Comanda não encontrada'
+                ], 404);
+            }
+
+            return response()->json($order);
         } catch (\Exception $e) {
             return response()->json([
-                'message' => 'Erro ao buscar comandas da mesa',
+                'message' => 'Erro ao buscar comanda',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -314,8 +394,7 @@ class OrderController extends Controller
         $order->update(['total' => $total]);
     }
 
-    // app/Http/Controllers/OrderController.php
-
+    // 📊 RESUMO DE VENDAS POR DATA
     public function salesSummary(Request $request)
     {
         try {
@@ -326,12 +405,12 @@ class OrderController extends Controller
 
             $totalSales = Order::where('restaurant_id', $request->restaurant_id)
                 ->where('status', 'fechado')
-                ->whereDate('closed_at', $request->date)
+                ->whereDate('order_date', $request->date)
                 ->sum('total');
 
             $totalOrders = Order::where('restaurant_id', $request->restaurant_id)
                 ->where('status', 'fechado')
-                ->whereDate('closed_at', $request->date)
+                ->whereDate('order_date', $request->date)
                 ->count();
 
             return response()->json([

@@ -10,6 +10,8 @@ class Order extends Model
     protected $fillable = [
         'restaurant_id',
         'table_id',
+        'order_number',
+        'order_date',        // 👈 NOVA COLUNA
         'customer_name',
         'status',
         'total',
@@ -19,6 +21,7 @@ class Order extends Model
 
     protected $casts = [
         'total' => 'decimal:2',
+        'order_date' => 'date',    // 👈 NOVO CAST
         'closed_at' => 'datetime'
     ];
 
